@@ -44,9 +44,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         lines.append("---")
         lines.append("")
 
-    lines.append("*Ceci n'est pas un conseil financier.*")
-    lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _esc_html(s: str) -> str:
@@ -98,5 +96,4 @@ def render_telegram(payload: dict[str, Any]) -> str:
 
         lines.append("")  # blank line between holdings
 
-    lines.append("<i>Ceci n'est pas un conseil financier.</i>")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip()

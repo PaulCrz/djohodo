@@ -206,8 +206,7 @@ async def run_watch(
         digest = (
             f"# Veille Djohodo — {today.isoformat()}\n\n"
             "_L'agent n'a pas appelé `submit_digest` ; "
-            "payload structuré indisponible. Voir les logs._\n\n"
-            "---\n*Ceci n'est pas un conseil financier.*\n"
+            "payload structuré indisponible. Voir les logs._\n"
         )
     else:
         # `date` is required by the schema but the model can be sloppy; fill

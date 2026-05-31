@@ -6,10 +6,10 @@ Four channels are supported:
   * **SMTP** — opt-in via ``DJOHODO_EMAIL_ENABLED=1``; minimal plain-text
     sender. Reads ``SMTP_HOST``, ``SMTP_PORT``, ``SMTP_USER``,
     ``SMTP_PASSWORD``, ``SMTP_FROM``, ``SMTP_TO`` from the environment.
-  * **WhatsApp** — opt-in via ``DJOHODO_WHATSAPP_ENABLED=1``; sends through
-    the Meta Cloud API. Uses the WhatsApp-flavoured renderer from
-    :mod:`watcher.render`, not the Markdown digest. See
-    :func:`_send_whatsapp` for the env vars and the text-vs-template choice.
+  * **Telegram** — opt-in via ``DJOHODO_TELEGRAM_ENABLED=1``; sends a single
+    HTML-formatted message through the Bot API. Uses the Telegram-flavoured
+    renderer from :mod:`watcher.render`. See :func:`_send_telegram` for the
+    env vars.
 
 The function returns the path of the written file so the caller (or CI) can
 publish it as an artifact.
@@ -27,15 +27,13 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-from watcher.render import render_whatsapp
+from watcher.render import render_telegram
 
 
 DIGESTS_DIR = Path("digests")
 
-# Meta Cloud API constants.
-WHATSAPP_API_VERSION = "v21.0"
-WHATSAPP_TEXT_BODY_LIMIT = 4096
-WHATSAPP_TEMPLATE_PARAM_LIMIT = 1024
+# Telegram Bot API hard cap on a single ``sendMessage`` body.
+TELEGRAM_TEXT_LIMIT = 4096
 
 
 def deliver(
@@ -43,12 +41,12 @@ def deliver(
     structured: dict[str, Any] | None = None,
     today: date | None = None,
 ) -> Path:
-    """Print, persist, and optionally email + WhatsApp the digest.
+    """Print, persist, and optionally email + push to Telegram the digest.
 
     Args:
         digest: The Markdown digest text (used for console, file, and SMTP).
         structured: The typed payload returned by the agent. Required to
-            render the WhatsApp variant; if absent, WhatsApp delivery is
+            render the Telegram variant; if absent, Telegram delivery is
             skipped even when enabled (with a log line).
         today: Reference date used for the filename. Defaults to today.
 
@@ -70,19 +68,19 @@ def deliver(
             # Email is best-effort; never fail the run because of it.
             print(f"[djohodo] SMTP delivery failed: {exc}")
 
-    if os.environ.get("DJOHODO_WHATSAPP_ENABLED") == "1":
+    if os.environ.get("DJOHODO_TELEGRAM_ENABLED") == "1":
         if structured is None:
             print(
-                "[djohodo] WhatsApp delivery skipped: "
+                "[djohodo] Telegram delivery skipped: "
                 "structured payload missing."
             )
         else:
             try:
-                _send_whatsapp(render_whatsapp(structured))
-                print("[djohodo] WhatsApp delivery OK.")
-            except Exception as exc:  # pragma: no cover - depends on WA env
-                # WhatsApp is best-effort; never fail the run because of it.
-                print(f"[djohodo] WhatsApp delivery failed: {exc}")
+                _send_telegram(render_telegram(structured))
+                print("[djohodo] Telegram delivery OK.")
+            except Exception as exc:  # pragma: no cover - depends on TG env
+                # Telegram is best-effort; never fail the run because of it.
+                print(f"[djohodo] Telegram delivery failed: {exc}")
 
     return out_path
 
@@ -108,104 +106,54 @@ def _send_email(digest: str, today: date) -> None:
         smtp.send_message(msg)
 
 
-def _send_whatsapp(message: str) -> None:
-    """Send a WhatsApp message via Meta's Cloud API.
+def _send_telegram(message: str) -> None:
+    """Send a single message via the Telegram Bot API.
 
-    Two modes, selected with the ``WHATSAPP_MODE`` env var:
+    Required env:
+        ``TELEGRAM_BOT_TOKEN`` — issued by ``@BotFather`` when you create
+            the bot (format: ``123456:ABC-…``).
+        ``TELEGRAM_CHAT_ID`` — target chat:
+            - your own numeric user id for a private chat (positive int),
+            - ``-100…`` for a channel or supergroup,
+            - or ``@channel_username`` for a public channel.
 
-    * ``text`` (default) — free-form text message. Meta only allows this
-      *within the 24-hour customer-service window* opened by the recipient
-      messaging your business number. For an unattended daily cron, the
-      window is unlikely to be open, so prefer ``template`` mode below.
-      Useful for interactive debugging or for delivery to a number that
-      messages your bot daily.
-
-    * ``template`` — sends a pre-approved template message. This is the
-      canonical pattern for unattended outbound messages. The template
-      must be created (and approved) in Meta Business Suite first; this
-      code assumes a single ``{{1}}`` body parameter into which the
-      rendered digest is injected. Template body parameters are capped at
-      1024 characters by Meta — longer payloads are truncated with an
-      ellipsis. Set ``WHATSAPP_TEMPLATE_NAME`` and optionally
-      ``WHATSAPP_TEMPLATE_LANGUAGE`` (default ``fr``).
-
-    Required env (both modes):
-        ``WHATSAPP_PHONE_NUMBER_ID`` — id of your business phone number
-        ``WHATSAPP_ACCESS_TOKEN`` — bearer token (system-user token preferred)
-        ``WHATSAPP_RECIPIENT`` — destination phone in E.164 without the ``+``
+    Messages longer than 4096 chars are truncated with an ellipsis. The
+    bot must have been started by the user once (``/start``) before it can
+    DM them.
     """
-    phone_number_id = os.environ["WHATSAPP_PHONE_NUMBER_ID"]
-    access_token = os.environ["WHATSAPP_ACCESS_TOKEN"]
-    recipient = os.environ["WHATSAPP_RECIPIENT"]
-    mode = os.environ.get("WHATSAPP_MODE", "text").lower()
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
-    if mode == "template":
-        body = _build_template_body(recipient, message)
-    elif mode == "text":
-        body = _build_text_body(recipient, message)
-    else:
-        raise ValueError(
-            f"Invalid WHATSAPP_MODE={mode!r}; expected 'text' or 'template'."
-        )
+    if len(message) > TELEGRAM_TEXT_LIMIT:
+        message = message[: TELEGRAM_TEXT_LIMIT - 1] + "…"
 
-    url = (
-        f"https://graph.facebook.com/{WHATSAPP_API_VERSION}"
-        f"/{phone_number_id}/messages"
-    )
+    body = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        # Don't show the large card preview for the first source URL — the
+        # digest already lists multiple sources, the preview adds noise.
+        "disable_web_page_preview": True,
+    }
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        },
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            resp.read()  # consume so the connection can be reused/closed cleanly
+            payload = json.loads(resp.read().decode("utf-8"))
+            if not payload.get("ok"):
+                raise RuntimeError(
+                    f"Telegram API non-OK response: {payload}"
+                )
     except urllib.error.HTTPError as exc:
-        # Meta puts the actual error reason in the response body — surface it.
+        # Telegram puts the actual error reason in the response body
+        # ({"ok": false, "description": "..."}). Surface it.
         error_body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(
-            f"WhatsApp API HTTP {exc.code}: {error_body}"
+            f"Telegram API HTTP {exc.code}: {error_body}"
         ) from exc
-
-
-def _build_text_body(recipient: str, message: str) -> dict[str, Any]:
-    """Compose a WhatsApp text message body, truncating past Meta's limit."""
-    if len(message) > WHATSAPP_TEXT_BODY_LIMIT:
-        message = message[: WHATSAPP_TEXT_BODY_LIMIT - 1] + "…"
-    return {
-        "messaging_product": "whatsapp",
-        "to": recipient,
-        "type": "text",
-        "text": {"preview_url": False, "body": message},
-    }
-
-
-def _build_template_body(recipient: str, message: str) -> dict[str, Any]:
-    """Compose a WhatsApp template message body.
-
-    The template must already exist on Meta's side and use a single
-    ``{{1}}`` body parameter — that's where ``message`` is injected.
-    """
-    template_name = os.environ["WHATSAPP_TEMPLATE_NAME"]
-    language = os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE", "fr")
-    if len(message) > WHATSAPP_TEMPLATE_PARAM_LIMIT:
-        message = message[: WHATSAPP_TEMPLATE_PARAM_LIMIT - 1] + "…"
-    return {
-        "messaging_product": "whatsapp",
-        "to": recipient,
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {"code": language},
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [{"type": "text", "text": message}],
-                }
-            ],
-        },
-    }

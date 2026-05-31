@@ -7,7 +7,7 @@ Flow:
   3. Run the async ``query()`` with WebSearch + that tool allowed.
   4. The tool handler captures the model's structured payload into a closure.
   5. Render the payload to Markdown (via :mod:`watcher.render`) — the
-     structured form is what later modules (analyst, WhatsApp delivery,
+     structured form is what later modules (analyst, Telegram delivery,
      plain-text email) will consume.
 
 Authentication is read entirely from the environment (see README). No

@@ -168,16 +168,13 @@ manual `workflow_dispatch`. Required configuration:
 - `ANTHROPIC_API_KEY` *(optional)* — only if you switch the workflow to the
   pay-as-you-go path (see auth section above).
 - `SMTP_*` *(optional)* — only if you enable email delivery.
-- `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_RECIPIENT`,
-  `WHATSAPP_TEMPLATE_NAME` *(optional)* — only if you enable WhatsApp delivery.
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` *(optional)* — only if you enable
+  Telegram delivery.
 
 **Repository variables (optional)**
 - `DJOHODO_MODEL` — override the model id (default: Haiku 4.5).
 - `DJOHODO_EMAIL_ENABLED` — set to `1` to enable SMTP delivery.
-- `DJOHODO_WHATSAPP_ENABLED` — set to `1` to enable WhatsApp delivery.
-- `WHATSAPP_MODE` — `template` (default, required for unattended cron) or
-  `text` (only inside Meta's 24h customer-service window).
-- `WHATSAPP_TEMPLATE_LANGUAGE` — defaults to `fr`.
+- `DJOHODO_TELEGRAM_ENABLED` — set to `1` to enable Telegram delivery.
 
 Each successful run uploads the digest as a workflow artifact and commits
 `digests/YYYY-MM-DD.md` back to the repo. The cron expression is in UTC —
@@ -185,56 +182,43 @@ adjust the `0 6 * * *` value if you want a different local morning time.
 
 ---
 
-## WhatsApp delivery (optional)
+## Telegram delivery (optional)
 
-The watcher can push the digest to WhatsApp via Meta's **Cloud API** — free
-for the first ~1,000 conversations per month, no third-party dependency.
+The watcher can push the digest to Telegram via the **Bot API** — free,
+unlimited for personal use, no business verification, no template approval,
+no 24h conversation window. Setup is ~2 minutes.
 
-**Why a template, not a plain text message.** WhatsApp only lets a business
-send arbitrary text *within the 24-hour window* opened by the recipient
-messaging the business. A daily morning cron normally fires outside that
-window, so the supported path is an approved **template message** that
-takes the digest as a single body parameter.
+**One-time setup on Telegram's side:**
 
-**One-time setup on Meta's side:**
-
-1. Create a [Meta Business account](https://business.facebook.com/) and a
-   WhatsApp Business account inside it.
-2. Add a phone number to the WhatsApp Business account (a free test number
-   is fine to start).
-3. In **Meta for Developers → Your App → WhatsApp → API Setup**, copy:
-   - the **Phone number ID** → `WHATSAPP_PHONE_NUMBER_ID`
-   - a **System User access token** (long-lived, preferred) →
-     `WHATSAPP_ACCESS_TOKEN`
-4. Add your own phone as a **recipient** in the test contacts (or in
-   production, register an opt-in flow).
-5. Create a **message template** in **WhatsApp Manager → Message
-   Templates**. Minimal shape:
-   - Name: `veille_djohodo` (any snake_case name)
-   - Category: **UTILITY**
-   - Language: French (`fr`)
-   - Body: `Voici votre veille Djohodo:\n\n{{1}}` — exactly one variable
-   - Submit for approval (usually < 24h)
-6. Once approved, set the template name → `WHATSAPP_TEMPLATE_NAME`.
+1. In Telegram, message **`@BotFather`** → `/newbot` → pick a display name
+   and a unique `@username` ending in `bot`. BotFather replies with an
+   HTTP token of the form `123456789:ABC-DEF…`. Save it — that's your
+   `TELEGRAM_BOT_TOKEN`.
+2. Message **`@userinfobot`** in Telegram → it replies with your numeric
+   user id. That's your `TELEGRAM_CHAT_ID` (positive integer for a private
+   chat). For a channel use `@channel_username`; for a supergroup use the
+   `-100…` form.
+3. Open a chat with your new bot and press **Start** (or send `/start`) —
+   Telegram requires the user to initiate contact before the bot can DM
+   them.
 
 **Then enable it in CI:**
 
-- Add the four secrets: `WHATSAPP_PHONE_NUMBER_ID`,
-  `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_RECIPIENT` (your phone in E.164 with
-  no leading `+`, e.g. `33612345678`), `WHATSAPP_TEMPLATE_NAME`.
-- Set the variable `DJOHODO_WHATSAPP_ENABLED=1`.
-- Leave `WHATSAPP_MODE` at its default `template`.
+```bash
+gh secret set TELEGRAM_BOT_TOKEN --repo PaulCrz/djohodo   # paste the BotFather token
+gh secret set TELEGRAM_CHAT_ID   --repo PaulCrz/djohodo   # paste your numeric id
+gh variable set DJOHODO_TELEGRAM_ENABLED --body 1 --repo PaulCrz/djohodo
+```
 
-**Local testing tip.** Inside the 24h window (right after you've messaged
-your bot from WhatsApp), you can flip `WHATSAPP_MODE=text` to iterate on
-the message without going through a template re-approval each time.
+The next cron (or a manual `gh workflow run daily-watch.yml`) will deliver
+the digest to your Telegram chat as an HTML-formatted message.
 
 **Caveats.**
-- Template body parameters are capped at 1024 chars by Meta; longer digests
-  are truncated with `…`. If you carry many tickers, consider a shorter
-  template body or split into multiple messages.
-- Delivery is best-effort: a WhatsApp failure logs but never fails the run,
-  so the GitHub-committed digest remains the source of truth.
+- Messages above 4096 chars are truncated with an ellipsis (Telegram's
+  hard cap on a single `sendMessage`). For a portfolio that pushes past
+  that, the renderer is the place to compact.
+- Delivery is best-effort: a Telegram failure logs but never fails the
+  run, so the GitHub-committed digest remains the source of truth.
 
 ---
 

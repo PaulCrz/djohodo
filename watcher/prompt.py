@@ -4,7 +4,7 @@ The model is instructed to research via WebSearch and then deliver the digest
 *exclusively* through the ``mcp__djohodo__submit_digest`` MCP tool — no
 free-form Markdown in the response stream. This guarantees a clean payload,
 sidesteps tool-use narration leaking into the saved file, and gives every
-downstream renderer (Markdown, WhatsApp, email…) a single structured source
+downstream renderer (Markdown, Telegram, email…) a single structured source
 of truth.
 """
 

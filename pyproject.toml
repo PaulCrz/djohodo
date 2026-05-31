@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "djohodo"
+version = "0.1.0"
+description = "Daily portfolio news-watch agent (Phase 1: watcher)."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Paul Crézé" }]
+license = { text = "Proprietary" }
+dependencies = [
+    "claude-agent-sdk>=0.1.0",
+    "anyio>=4.4.0",
+]
+
+[project.scripts]
+djohodo = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["watcher*", "analyst*"]
+exclude = ["digests*", "tests*"]

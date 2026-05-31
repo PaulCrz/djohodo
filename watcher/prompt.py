@@ -1,9 +1,11 @@
 """Prompt template for the daily portfolio news watch.
 
-Kept in its own module so the wording can be iterated on without touching the
-agent orchestration code. The template is intentionally explicit about what
-"material" news means and about output formatting, since these are the two
-levers that most affect digest quality.
+The model is instructed to research via WebSearch and then deliver the digest
+*exclusively* through the ``mcp__djohodo__submit_digest`` MCP tool — no
+free-form Markdown in the response stream. This guarantees a clean payload,
+sidesteps tool-use narration leaking into the saved file, and gives every
+downstream renderer (Markdown, WhatsApp, email…) a single structured source
+of truth.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ def build_prompt(
     holdings: Iterable[Mapping[str, str]],
     today: date,
 ) -> str:
-    """Assemble the digest prompt.
+    """Assemble the watch prompt.
 
     Args:
         holdings: Iterable of ``{"ticker": str, "name": str}`` mappings.
@@ -35,36 +37,32 @@ Aujourd'hui : {today.isoformat()}.
 Portefeuille à surveiller :
 {holdings_block}
 
-Pour CHAQUE position ci-dessus, effectue une recherche web (outil WebSearch) afin
-de trouver les actualités financières *matérielles* publiées au cours des
-dernières 24 heures (résultats trimestriels, guidance, M&A, régulation,
-litiges majeurs, départ/arrivée d'un dirigeant, événement macro spécifique,
-mouvement de cours inhabituel avec catalyseur identifié, etc.).
+Pour CHAQUE position ci-dessus, effectue une ou deux recherches web (outil
+WebSearch) afin de trouver les actualités financières *matérielles* publiées
+au cours des dernières 24 heures (résultats trimestriels, guidance, M&A,
+régulation, litiges majeurs, départ/arrivée d'un dirigeant, événement macro
+spécifique, mouvement de cours inhabituel avec catalyseur identifié, etc.).
 
 Règles strictes :
-1. Ignore les actualités non matérielles (rumeurs sans source, billets d'opinion,
-   recommandations d'analystes isolées sans nouvelle information, articles
-   promotionnels, contenus dupliqués).
-2. Si une position n'a aucune actualité matérielle dans les 24h, écris
-   explicitement « Aucune actualité matérielle. » — n'invente rien.
-3. Pour chaque actualité retenue, indique son impact probable sur le titre :
-   **haussier**, **baissier**, ou **neutre**, avec une justification d'une
-   phrase qui s'appuie sur le contenu de l'article.
-4. Cite la source de chaque actualité avec son URL.
-5. Réponds en français, en Markdown.
-6. Termine impérativement le digest par cette ligne :
-   « *Ceci n'est pas un conseil financier.* »
+1. Ignore les actualités non matérielles (rumeurs sans source, billets
+   d'opinion, recommandations d'analystes isolées sans nouvelle information,
+   articles promotionnels, contenus dupliqués).
+2. Si une position n'a aucune actualité matérielle dans les 24h, retourne
+   simplement une liste `items` vide pour cette position — n'invente rien.
+3. Pour chaque actualité retenue, classe son impact probable sur le titre :
+   `haussier`, `baissier`, ou `neutre`, avec une `rationale` d'une phrase qui
+   s'appuie sur le contenu de l'article.
+4. Cite la source : `source_name` (ex : « Reuters », « Bloomberg ») et
+   `source_url` (URL canonique).
+5. Toutes les chaînes de caractères (titres, rationales, noms de source) sont
+   en français.
 
-Format de sortie attendu :
+LIVRAISON DU DIGEST :
 
-# Veille Djohodo — {today.isoformat()}
-
-## TICKER — Nom de la société
-- **Titre de l'actualité** ([source](url))
-  - *Impact :* haussier / baissier / neutre — justification courte.
-
-(répéter pour chaque position)
-
----
-*Ceci n'est pas un conseil financier.*
+Quand tu as terminé toutes tes recherches, appelle UNE SEULE FOIS l'outil
+`mcp__djohodo__submit_digest` avec le payload JSON structuré complet
+(champs `date` au format ISO et `holdings` listés dans l'ordre du
+portefeuille ci-dessus). NE PUBLIE PAS le digest sous forme de Markdown ou
+de texte libre — il doit transiter exclusivement par l'outil. Après cet
+appel, ne produis plus aucun texte.
 """

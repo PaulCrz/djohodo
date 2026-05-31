@@ -42,9 +42,12 @@ jobs:
 
       - name: Run Djohodo watcher
         env:
-          # Pay-as-you-go path. For subscription-credit billing in CI, use the
-          # official Claude Code GitHub Actions integration instead — see README.
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Subscription-credit path: long-lived OAuth token generated locally
+          # with `claude setup-token` and stored as the CLAUDE_CODE_OAUTH_TOKEN
+          # repo secret. The Claude Agent SDK picks it up automatically.
+          # ANTHROPIC_API_KEY is deliberately NOT set, so the SDK falls back
+          # to the OAuth token rather than billing pay-as-you-go.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           DJOHODO_MODEL: ${{ vars.DJOHODO_MODEL || 'claude-haiku-4-5-20251001' }}
           DJOHODO_EMAIL_ENABLED: ${{ vars.DJOHODO_EMAIL_ENABLED || '0' }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}

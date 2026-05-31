@@ -1,69 +1,30 @@
 """Djohodo CLI entrypoint.
 
 Usage:
-    python main.py                       # default: load ./portfolio.json and run
-    python main.py --portfolio my.json   # custom portfolio path
+    python main.py                       # use PORTFOLIO_SHEET_URL if set, else ./portfolio.json
+    python main.py --portfolio my.json   # override the local JSON path
     python main.py --dry-run             # build the prompt and print it, no API call
 
-The ``--dry-run`` flag is the safe way to iterate on prompt wording, holdings,
-or system configuration without consuming any Agent SDK credit.
+The portfolio source is picked by :func:`watcher.portfolio.load_portfolio`:
+``PORTFOLIO_SHEET_URL`` (Google Sheet published as CSV) takes precedence
+over the local JSON file.
+
+The ``--dry-run`` flag is the safe way to iterate on prompt wording,
+holdings, or system configuration without consuming any Agent SDK credit.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import anyio
 
 from watcher import deliver
 from watcher.agent import assemble_prompt, run_watch
-
-
-def _load_portfolio(path: Path) -> list[dict[str, str]]:
-    """Read ``portfolio.json`` and return a list of ``{ticker, name}`` dicts.
-
-    Raises:
-        SystemExit: When the file is missing, malformed, or has no holdings.
-    """
-    if not path.exists():
-        print(
-            f"[djohodo] Portfolio file not found: {path}\n"
-            "         Copy portfolio.example.json to portfolio.json and edit it.",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-
-    try:
-        data: Any = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        print(f"[djohodo] Invalid JSON in {path}: {exc}", file=sys.stderr)
-        raise SystemExit(2) from exc
-
-    holdings = data.get("holdings") if isinstance(data, dict) else None
-    if not isinstance(holdings, list) or not holdings:
-        print(
-            f"[djohodo] {path} must contain a non-empty 'holdings' list.",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-
-    cleaned: list[dict[str, str]] = []
-    for entry in holdings:
-        if (
-            isinstance(entry, dict)
-            and isinstance(entry.get("ticker"), str)
-            and isinstance(entry.get("name"), str)
-        ):
-            cleaned.append({"ticker": entry["ticker"], "name": entry["name"]})
-    if not cleaned:
-        print(f"[djohodo] No valid holdings found in {path}.", file=sys.stderr)
-        raise SystemExit(2)
-    return cleaned
+from watcher.portfolio import load_portfolio
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -75,7 +36,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--portfolio",
         type=Path,
         default=Path("portfolio.json"),
-        help="Path to the portfolio JSON file (default: ./portfolio.json).",
+        help=(
+            "Local JSON file used when PORTFOLIO_SHEET_URL env var is unset "
+            "(default: ./portfolio.json)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -91,7 +55,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    holdings = _load_portfolio(args.portfolio)
+    try:
+        holdings = load_portfolio(args.portfolio)
+    except RuntimeError as exc:
+        print(f"[djohodo] {exc}", file=sys.stderr)
+        return 2
+
     today = date.today()
 
     if args.dry_run:

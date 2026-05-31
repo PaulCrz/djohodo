@@ -29,19 +29,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Materialise portfolio.json from secret
-        # Store the JSON payload in the PORTFOLIO_JSON secret.
-        env:
-          PORTFOLIO_JSON: ${{ secrets.PORTFOLIO_JSON }}
-        run: |
-          if [ -z "$PORTFOLIO_JSON" ]; then
-            echo "::error::PORTFOLIO_JSON secret is not set." >&2
-            exit 1
-          fi
-          printf '%s' "$PORTFOLIO_JSON" > portfolio.json
-
       - name: Run Djohodo watcher
         env:
+          # Portfolio is pulled at runtime from a Google Sheet published
+          # as CSV (see README → "Portfolio from a Google Sheet"). The URL
+          # itself is the only secret needed — the sheet's "anyone with
+          # the link" / "publish to web" access controls everything else.
+          PORTFOLIO_SHEET_URL: ${{ secrets.PORTFOLIO_SHEET_URL }}
           # Subscription-credit path: long-lived OAuth token generated locally
           # with `claude setup-token` and stored as the CLAUDE_CODE_OAUTH_TOKEN
           # repo secret. The Claude Agent SDK picks it up automatically.

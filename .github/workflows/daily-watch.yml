@@ -71,7 +71,9 @@ jobs:
         run: |
           git config user.name  "djohodo-bot"
           git config user.email "djohodo-bot@users.noreply.github.com"
-          git add digests/*.md || true
+          # -f bypasses .gitignore (digests/* is locally ignored to keep
+          # ad-hoc runs out of git; CI is the legitimate publisher).
+          git add -f digests/*.md || true
           if git diff --cached --quiet; then
             echo "No new digest to commit."
           else

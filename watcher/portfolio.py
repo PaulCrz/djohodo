@@ -1,27 +1,20 @@
-"""Load the portfolio holdings — from a Google Sheet URL or a JSON file.
+"""Load the portfolio holdings from a published Google Sheet.
 
-Precedence (highest first):
-  1. ``PORTFOLIO_SHEET_URL`` env var → fetch the sheet as CSV and ask the
-     Agent SDK to extract tradable holdings (equities, ETFs, crypto) from
-     it. This is robust to arbitrary layouts (multi-section patrimonial
-     dashboards, mixed asset classes, French/English labels, etc.) and
-     converts Google-Finance-style tickers ("EPA:AM") to the Yahoo-Finance
-     format ("AM.PA") that financial news sources index more reliably.
-  2. JSON file at the path passed by the caller (defaults to
-     ``./portfolio.json``). Used for local dev / dry-run iteration with
-     a known clean list.
+The watcher fetches the sheet's CSV export, then a cheap Agent SDK pre-pass
+(Haiku by default; override via ``DJOHODO_PORTFOLIO_MODEL``) extracts the
+tradable holdings — equities, ETFs, crypto — and ignores everything else
+(cash, livrets, biens personnels, soldes bancaires). Tickers are normalised
+to Yahoo Finance format ("EPA:AM" → "AM.PA", "NASDAQ:SLS" → "SLS") so
+financial news sources index them reliably.
 
-Both paths return a ``list[{"ticker": str, "name": str}]``. The function
-itself is ``async`` because the sheet path makes an Agent SDK call;
+Both functions are ``async`` because the extraction step makes an SDK call;
 ``main.py`` already runs inside ``anyio.run``.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import urllib.request
-from pathlib import Path
 from typing import Any
 
 import anyio
@@ -112,30 +105,30 @@ PUBLIE AUCUN TEXTE LIBRE — passe exclusivement par l'outil.
 # --- Public entrypoint -------------------------------------------------------
 
 
-async def load_portfolio(json_path: Path | None = None) -> list[dict[str, str]]:
-    """Return a list of ``{"ticker", "name"}`` holdings.
-
-    Args:
-        json_path: File to read when no ``PORTFOLIO_SHEET_URL`` env var is
-            set. Defaults to ``./portfolio.json``.
+async def load_portfolio() -> list[dict[str, str]]:
+    """Return a list of ``{"ticker", "name"}`` holdings from the Sheet.
 
     Raises:
-        RuntimeError: If neither source yields a non-empty, well-formed
-            holdings list.
+        RuntimeError: If ``PORTFOLIO_SHEET_URL`` is unset, the fetch fails,
+            or the extraction yields no usable holdings.
     """
     sheet_url = os.environ.get("PORTFOLIO_SHEET_URL")
-    if sheet_url:
-        csv_text = await _fetch_sheet_csv(sheet_url)
-        return await _extract_holdings(csv_text)
-    return _load_from_json(json_path or Path("portfolio.json"))
+    if not sheet_url:
+        raise RuntimeError(
+            "PORTFOLIO_SHEET_URL is not set. "
+            "Publish your Google Sheet as CSV "
+            "(File → Share → Publish to web) and set the env var to that URL."
+        )
+    csv_text = await _fetch_sheet_csv(sheet_url)
+    return await _extract_holdings(csv_text)
 
 
-# --- Sheet path --------------------------------------------------------------
+# --- Sheet fetch -------------------------------------------------------------
 
 
 async def _fetch_sheet_csv(url: str) -> str:
-    """Fetch the published CSV. Synchronous urllib runs on a worker thread
-    so the event loop isn't blocked while Google Sheets does its thing
+    """Fetch the published CSV. Blocking urllib runs on a worker thread so
+    the event loop stays free while Google Sheets does its thing
     (typically <500 ms but can spike under cache misses)."""
 
     def _do_fetch() -> str:
@@ -148,6 +141,9 @@ async def _fetch_sheet_csv(url: str) -> str:
         raise RuntimeError(
             f"Could not fetch portfolio sheet at {url}: {exc}"
         ) from exc
+
+
+# --- LLM extraction ----------------------------------------------------------
 
 
 async def _extract_holdings(csv_text: str) -> list[dict[str, str]]:
@@ -229,40 +225,4 @@ async def _extract_holdings(csv_text: str) -> list[dict[str, str]]:
             "Check that the sheet contains tradable instruments "
             "(equities, ETFs, crypto) with identifiable tickers."
         )
-    return cleaned
-
-
-# --- JSON path (local fallback) ---------------------------------------------
-
-
-def _load_from_json(path: Path) -> list[dict[str, str]]:
-    """Read a local JSON file with shape ``{"holdings": [{ticker, name}, …]}``."""
-    if not path.exists():
-        raise RuntimeError(
-            f"Portfolio file not found: {path}. "
-            "Either copy portfolio.example.json to portfolio.json, "
-            "or set the PORTFOLIO_SHEET_URL env var."
-        )
-
-    try:
-        data: Any = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid JSON in {path}: {exc}") from exc
-
-    holdings = data.get("holdings") if isinstance(data, dict) else None
-    if not isinstance(holdings, list) or not holdings:
-        raise RuntimeError(
-            f"{path} must contain a non-empty 'holdings' list."
-        )
-
-    cleaned: list[dict[str, str]] = []
-    for entry in holdings:
-        if (
-            isinstance(entry, dict)
-            and isinstance(entry.get("ticker"), str)
-            and isinstance(entry.get("name"), str)
-        ):
-            cleaned.append({"ticker": entry["ticker"], "name": entry["name"]})
-    if not cleaned:
-        raise RuntimeError(f"No valid holdings found in {path}.")
     return cleaned

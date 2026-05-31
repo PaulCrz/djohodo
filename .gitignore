@@ -3,9 +3,6 @@
 .env.*
 !.env.example
 
-# Personal portfolio (the example file is checked in)
-portfolio.json
-
 # Generated digests (the .gitkeep is checked in)
 digests/*
 !digests/.gitkeep

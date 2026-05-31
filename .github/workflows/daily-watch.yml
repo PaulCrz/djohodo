@@ -43,13 +43,6 @@ jobs:
           # to the OAuth token rather than billing pay-as-you-go.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           DJOHODO_MODEL: ${{ vars.DJOHODO_MODEL || 'claude-haiku-4-5-20251001' }}
-          DJOHODO_EMAIL_ENABLED: ${{ vars.DJOHODO_EMAIL_ENABLED || '0' }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SMTP_FROM: ${{ secrets.SMTP_FROM }}
-          SMTP_TO: ${{ secrets.SMTP_TO }}
           # Telegram (Bot API) — see README. Toggle is a repo variable,
           # the bot token + chat id are secrets.
           DJOHODO_TELEGRAM_ENABLED: ${{ vars.DJOHODO_TELEGRAM_ENABLED || '0' }}

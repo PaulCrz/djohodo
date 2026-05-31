@@ -1,8 +1,0 @@
-{
-  "holdings": [
-    { "ticker": "AAPL", "name": "Apple Inc." },
-    { "ticker": "MSFT", "name": "Microsoft Corporation" },
-    { "ticker": "ASML", "name": "ASML Holding N.V." },
-    { "ticker": "MC.PA", "name": "LVMH Moët Hennessy Louis Vuitton" }
-  ]
-}

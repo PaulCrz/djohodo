@@ -15,24 +15,31 @@ It is an **informational decision-support tool**. It is **not financial advice**
 ## Architecture
 
 ```
-portfolio.json
+ Google Sheet (CSV)
       │
       ▼
- watcher/  ── builds prompt ──► Claude Agent SDK (WebSearch tool) ──► digest.md
-      │                                                                 │
-      │                                                                 ▼
-      │                                                          delivery
-      │                                                  (console, file, SMTP*)
+ watcher.portfolio  ── LLM extract ──► [{ticker, name}, …]
+      │
+      ▼
+ watcher.agent  ── Claude Agent SDK (WebSearch + structured output) ──► WatchResult
+      │
+      ▼
+ watcher.delivery  ──► console + digests/YYYY-MM-DD.md + Telegram
+      │
       ▼
  analyst/  ── Phase 2 placeholder: future buy/sell/watch recommender
 ```
 
 - **`watcher/`** — the only module with logic in Phase 1.
-  - `prompt.py` — digest prompt template (French Markdown, "not advice" footer).
-  - `agent.py` — orchestrates the async `query()` call, collects text blocks,
-    captures `total_cost_usd`.
-  - `delivery.py` — prints to stdout, writes `digests/YYYY-MM-DD.md`, optional
-    SMTP email behind `DJOHODO_EMAIL_ENABLED=1`.
+  - `portfolio.py` — fetches the Google Sheet and extracts holdings via a
+    cheap Haiku pre-pass.
+  - `prompt.py` — digest prompt template (French).
+  - `agent.py` — orchestrates the async `query()` call, captures the
+    structured payload via an MCP tool, exposes `total_cost_usd`.
+  - `render.py` — converts the typed payload to Markdown (file) and HTML
+    (Telegram).
+  - `delivery.py` — prints to stdout, writes `digests/YYYY-MM-DD.md`,
+    pushes to Telegram when `DJOHODO_TELEGRAM_ENABLED=1`.
 - **`analyst/`** — documented placeholder for Phase 2 ("help me decide"). See
   [`analyst/README.md`](analyst/README.md) for the planned extension point.
 - **`main.py`** — CLI: loads portfolio, runs the watcher, delivers the digest.
@@ -55,17 +62,11 @@ pip install -e .
 
 ### 2. Configure your portfolio
 
-Two supported sources, picked at runtime:
-
-- **Google Sheet** (recommended, used by the CI cron). Set the env var
-  `PORTFOLIO_SHEET_URL` to the sheet's CSV-export URL — see
-  "Portfolio from a Google Sheet" below.
-- **Local JSON file** (used when the env var is unset; handy for `--dry-run`):
-  ```bash
-  cp portfolio.example.json portfolio.json
-  # edit portfolio.json — list of { ticker, name }
-  ```
-  `portfolio.json` is git-ignored.
+Set `PORTFOLIO_SHEET_URL` to the CSV-export URL of a published Google
+Sheet — see "Portfolio from a Google Sheet" below for the one-time setup.
+The watcher extracts your holdings from that sheet on every run via a
+cheap LLM pre-pass (~$0.005), so any sheet layout works and you never
+edit the repo when your portfolio changes.
 
 ### 3. Configure environment
 
@@ -128,14 +129,16 @@ and update the workflow's `Run Djohodo` step to expose
 
 ## Run
 
-### Dry run (no model call, no cost)
+### Dry run (cheap, no watch call)
 
 ```bash
 python main.py --dry-run
 ```
 
-Prints the fully-assembled prompt for inspection. Use this while iterating on
-`watcher/prompt.py` or your `portfolio.json`.
+Fetches your sheet, runs the extraction pre-pass (~$0.005), and prints
+the fully-assembled news-watch prompt for inspection. Use this when you
+add new tickers to the sheet or iterate on `watcher/prompt.py`, without
+paying for a full WebSearch round.
 
 ### Real run
 
@@ -144,10 +147,10 @@ python main.py
 ```
 
 This will:
-1. Build the prompt from `portfolio.json`.
-2. Call the Agent SDK with `WebSearch` allowed.
+1. Fetch your portfolio sheet and extract tradable holdings (Haiku pre-pass).
+2. Build the prompt and call the Agent SDK with `WebSearch` allowed.
 3. Print the digest, write it to `digests/YYYY-MM-DD.md`.
-4. Optionally email it (if `DJOHODO_EMAIL_ENABLED=1`).
+4. Push it to Telegram (if `DJOHODO_TELEGRAM_ENABLED=1`).
 5. Print the model id and `total_cost_usd` on stderr.
 
 ### Override the model
@@ -173,13 +176,11 @@ manual `workflow_dispatch`. Required configuration:
   (see "Portfolio from a Google Sheet" below).
 - `ANTHROPIC_API_KEY` *(optional)* — only if you switch the workflow to the
   pay-as-you-go path (see auth section above).
-- `SMTP_*` *(optional)* — only if you enable email delivery.
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` *(optional)* — only if you enable
   Telegram delivery.
 
 **Repository variables (optional)**
 - `DJOHODO_MODEL` — override the model id (default: Haiku 4.5).
-- `DJOHODO_EMAIL_ENABLED` — set to `1` to enable SMTP delivery.
 - `DJOHODO_TELEGRAM_ENABLED` — set to `1` to enable Telegram delivery.
 
 Each successful run uploads the digest as a workflow artifact and commits

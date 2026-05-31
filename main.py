@@ -1,16 +1,19 @@
 """Djohodo CLI entrypoint.
 
 Usage:
-    python main.py                       # use PORTFOLIO_SHEET_URL if set, else ./portfolio.json
-    python main.py --portfolio my.json   # override the local JSON path
-    python main.py --dry-run             # build the prompt and print it, no API call
+    python main.py                # real run: extract holdings → watch → deliver
+    python main.py --dry-run      # extract holdings + print the prompt, no watch
+    python main.py --model X      # override the model for both pre-pass and watch
 
-The portfolio source is picked by :func:`watcher.portfolio.load_portfolio`:
-``PORTFOLIO_SHEET_URL`` (Google Sheet published as CSV) takes precedence
-over the local JSON file.
+The portfolio source is the published Google Sheet behind
+``PORTFOLIO_SHEET_URL``. Telegram is the sole delivery channel
+(``DJOHODO_TELEGRAM_ENABLED=1`` + ``TELEGRAM_BOT_TOKEN`` +
+``TELEGRAM_CHAT_ID``); the digest is also always written to
+``digests/YYYY-MM-DD.md``.
 
-The ``--dry-run`` flag is the safe way to iterate on prompt wording,
-holdings, or system configuration without consuming any Agent SDK credit.
+``--dry-run`` still spends the ~$0.005 portfolio extraction call but
+skips the WebSearch + digest call, so it's the cheap way to verify the
+sheet parses and to inspect the prompt.
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import date
-from pathlib import Path
 
 import anyio
 
@@ -33,18 +35,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Daily portfolio news watch — produces a Markdown digest.",
     )
     parser.add_argument(
-        "--portfolio",
-        type=Path,
-        default=Path("portfolio.json"),
-        help=(
-            "Local JSON file used when PORTFOLIO_SHEET_URL env var is unset "
-            "(default: ./portfolio.json)."
-        ),
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Assemble and print the prompt without calling the model.",
+        help="Assemble and print the prompt without calling the news watcher.",
     )
     parser.add_argument(
         "--model",
@@ -56,7 +49,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _amain(args: argparse.Namespace) -> int:
     try:
-        holdings = await load_portfolio(args.portfolio)
+        holdings = await load_portfolio()
     except RuntimeError as exc:
         print(f"[djohodo] {exc}", file=sys.stderr)
         return 2
@@ -67,7 +60,7 @@ async def _amain(args: argparse.Namespace) -> int:
         prompt = assemble_prompt(holdings, today)
         print("===== DJOHODO DRY RUN — PROMPT PREVIEW =====")
         print(prompt)
-        print("===== END OF PROMPT (no model call performed) =====")
+        print("===== END OF PROMPT (no watch call performed) =====")
         return 0
 
     try:

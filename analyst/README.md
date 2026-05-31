@@ -15,7 +15,7 @@ portfolio sizing, conviction levels, and risk constraints) and surface
 The current Phase 1 pipeline is:
 
 ```
-portfolio.json ──► watcher.run_watch ──► WatchResult(digest, model, total_cost_usd)
+Google Sheet (CSV) ──► watcher.load_portfolio ──► watcher.run_watch ──► WatchResult
                                               │
                                               ▼
                                       watcher.delivery.deliver

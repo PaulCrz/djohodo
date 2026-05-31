@@ -1,11 +1,8 @@
 """Delivery layer: where the digest goes once it has been produced.
 
-Four channels are supported:
+Three channels:
   * **console** — always on; prints the Markdown digest to stdout.
   * **file** — always on; writes ``digests/YYYY-MM-DD.md``.
-  * **SMTP** — opt-in via ``DJOHODO_EMAIL_ENABLED=1``; minimal plain-text
-    sender. Reads ``SMTP_HOST``, ``SMTP_PORT``, ``SMTP_USER``,
-    ``SMTP_PASSWORD``, ``SMTP_FROM``, ``SMTP_TO`` from the environment.
   * **Telegram** — opt-in via ``DJOHODO_TELEGRAM_ENABLED=1``; sends a single
     HTML-formatted message through the Bot API. Uses the Telegram-flavoured
     renderer from :mod:`watcher.render`. See :func:`_send_telegram` for the
@@ -19,11 +16,9 @@ from __future__ import annotations
 
 import json
 import os
-import smtplib
 import urllib.error
 import urllib.request
 from datetime import date
-from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +36,10 @@ def deliver(
     structured: dict[str, Any] | None = None,
     today: date | None = None,
 ) -> Path:
-    """Print, persist, and optionally email + push to Telegram the digest.
+    """Print, persist, and optionally push to Telegram the digest.
 
     Args:
-        digest: The Markdown digest text (used for console, file, and SMTP).
+        digest: The Markdown digest text (used for console + file).
         structured: The typed payload returned by the agent. Required to
             render the Telegram variant; if absent, Telegram delivery is
             skipped even when enabled (with a log line).
@@ -61,13 +56,6 @@ def deliver(
     out_path = DIGESTS_DIR / f"{today.isoformat()}.md"
     out_path.write_text(digest, encoding="utf-8")
 
-    if os.environ.get("DJOHODO_EMAIL_ENABLED") == "1":
-        try:
-            _send_email(digest, today)
-        except Exception as exc:  # pragma: no cover - depends on SMTP env
-            # Email is best-effort; never fail the run because of it.
-            print(f"[djohodo] SMTP delivery failed: {exc}")
-
     if os.environ.get("DJOHODO_TELEGRAM_ENABLED") == "1":
         if structured is None:
             print(
@@ -83,27 +71,6 @@ def deliver(
                 print(f"[djohodo] Telegram delivery failed: {exc}")
 
     return out_path
-
-
-def _send_email(digest: str, today: date) -> None:
-    """Minimal SMTP sender. Raises if any required env var is missing."""
-    host = os.environ["SMTP_HOST"]
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    user = os.environ["SMTP_USER"]
-    password = os.environ["SMTP_PASSWORD"]
-    sender = os.environ.get("SMTP_FROM", user)
-    recipient = os.environ["SMTP_TO"]
-
-    msg = EmailMessage()
-    msg["Subject"] = f"Veille Djohodo — {today.isoformat()}"
-    msg["From"] = sender
-    msg["To"] = recipient
-    msg.set_content(digest)
-
-    with smtplib.SMTP(host, port) as smtp:
-        smtp.starttls()
-        smtp.login(user, password)
-        smtp.send_message(msg)
 
 
 def _send_telegram(message: str) -> None:

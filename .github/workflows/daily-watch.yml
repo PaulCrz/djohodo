@@ -56,6 +56,15 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
+          # WhatsApp (Meta Cloud API) — see README. WHATSAPP_MODE/LANGUAGE
+          # are repo variables; everything else is a secret.
+          DJOHODO_WHATSAPP_ENABLED: ${{ vars.DJOHODO_WHATSAPP_ENABLED || '0' }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_RECIPIENT: ${{ secrets.WHATSAPP_RECIPIENT }}
+          WHATSAPP_MODE: ${{ vars.WHATSAPP_MODE || 'template' }}
+          WHATSAPP_TEMPLATE_NAME: ${{ secrets.WHATSAPP_TEMPLATE_NAME }}
+          WHATSAPP_TEMPLATE_LANGUAGE: ${{ vars.WHATSAPP_TEMPLATE_LANGUAGE || 'fr' }}
         run: python main.py
 
       - name: Upload digest as artifact

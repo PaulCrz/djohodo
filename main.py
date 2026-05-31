@@ -107,7 +107,7 @@ async def _amain(args: argparse.Namespace) -> int:
         print(f"[djohodo] Run failed: {exc}", file=sys.stderr)
         return 1
 
-    out_path = deliver(result.digest, today=today)
+    out_path = deliver(result.digest, structured=result.structured, today=today)
 
     cost_str = (
         f"${result.total_cost_usd:.4f}"

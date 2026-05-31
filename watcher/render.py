@@ -47,3 +47,36 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append("*Ceci n'est pas un conseil financier.*")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_whatsapp(payload: dict[str, Any]) -> str:
+    """Render the structured digest for WhatsApp text messages.
+
+    WhatsApp accepts a narrow markdown subset: ``*bold*``, ``_italic_``,
+    ``~strike~``, triple-backtick monospace. There are no headings, and link
+    syntax ``[label](url)`` is not interpreted — URLs must appear bare and
+    are auto-linkified by the WhatsApp client. We use bold lines as section
+    "headings" and plain-text URLs as sources.
+    """
+    lines: list[str] = [f"*Veille Djohodo — {payload['date']}*", ""]
+
+    for holding in payload.get("holdings", []):
+        lines.append(f"*{holding['ticker']} — {holding['name']}*")
+        items = holding.get("items", [])
+
+        if not items:
+            lines.append("_Aucune actualité matérielle._")
+        else:
+            for item in items:
+                source_name = item.get("source_name") or "source"
+                lines.append("")
+                lines.append(f"• *{item['title']}*")
+                lines.append(
+                    f"  Impact : *{item['impact']}* — {item['rationale']}"
+                )
+                lines.append(f"  Source : {source_name} — {item['source_url']}")
+
+        lines.append("")  # blank line between holdings
+
+    lines.append("_Ceci n'est pas un conseil financier._")
+    return "\n".join(lines)

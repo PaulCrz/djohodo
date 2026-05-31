@@ -56,7 +56,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _amain(args: argparse.Namespace) -> int:
     try:
-        holdings = load_portfolio(args.portfolio)
+        holdings = await load_portfolio(args.portfolio)
     except RuntimeError as exc:
         print(f"[djohodo] {exc}", file=sys.stderr)
         return 2

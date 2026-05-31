@@ -190,24 +190,26 @@ adjust the `0 6 * * *` value if you want a different local morning time.
 
 ## Portfolio from a Google Sheet
 
-The watcher can pull its holdings list from a published Google Sheet on
-every run, so you maintain the portfolio in Google Sheets and never touch
-the repo. No Google Cloud project, no service account, no API key — the
-sheet itself is the source of truth.
+The watcher pulls its holdings list from a published Google Sheet on every
+run, so you maintain the portfolio in Google Sheets and never touch the
+repo. No Google Cloud project, no service account, no API key.
 
-**Sheet contract:**
+**Any sheet layout works.** Before each daily watch, a cheap pre-step
+(Haiku, ~$0.005) extracts the tradable holdings from the raw CSV —
+equities, ETFs, crypto — and ignores everything else (cash, livrets,
+biens personnels, soldes bancaires…). It also converts Google-Finance
+ticker prefixes (`EPA:AM`, `NASDAQ:SLS`) to the Yahoo Finance format
+(`AM.PA`, `SLS`) that financial news sources index more reliably.
 
-| ticker  | name                     |
-|---------|--------------------------|
-| AAPL    | Apple Inc.               |
-| MSFT    | Microsoft Corporation    |
+That means you can point Djohodo at:
 
-- Column A = ticker (Yahoo Finance format works well — e.g. `MC.PA` for LVMH).
-- Column B = name (free text, shown verbatim in the prompt).
-- A header row with `ticker` / `name` is optional. With a header row, columns
-  can be in any order; without, columns A and B are assumed positionally.
-- Extra columns (quantity, buy price, sector…) are silently ignored.
-- Blank rows are skipped.
+- a clean two-column `ticker` / `name` sheet, **or**
+- a full patrimonial dashboard with multiple sections, sub-totals,
+  proportions, mixed asset classes — the extraction agent figures out
+  what's a tradable position and what's noise.
+
+The only thing it needs to recognise an instrument is a **ticker** or a
+clearly identifiable **company / ETF name** somewhere in the row.
 
 **Publish the sheet as CSV — two equivalent paths:**
 

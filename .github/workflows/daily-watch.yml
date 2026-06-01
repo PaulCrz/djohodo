@@ -2,8 +2,12 @@ name: Daily portfolio watch
 
 on:
   schedule:
-    # 06:00 UTC every day. Adjust if you want a different morning timezone.
-    - cron: "0 6 * * *"
+    # 06:17 UTC every day (≈08:17 Paris CEST / 07:17 CET).
+    # The :17 is deliberate — top-of-hour cron slots are heavily congested
+    # on GitHub Actions and routinely delayed by 15-60 min or skipped
+    # entirely. An off-peak minute gives the scheduler far better odds of
+    # firing on time.
+    - cron: "17 6 * * *"
   workflow_dispatch: {}
 
 permissions:

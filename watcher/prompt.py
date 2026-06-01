@@ -11,23 +11,33 @@ of truth.
 from __future__ import annotations
 
 from datetime import date
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
+
+
+def _format_holding(h: Mapping[str, Any]) -> str:
+    """Render one holding line. Unverified holdings (where the deterministic
+    ticker resolver couldn't confirm the name) get a `(non vérifié)` suffix
+    so the watcher can be conservative with that name in its search queries."""
+    suffix = "" if h.get("verified", True) else " *(non vérifié)*"
+    return f"- {h['ticker']} — {h['name']}{suffix}"
 
 
 def build_prompt(
-    holdings: Iterable[Mapping[str, str]],
+    holdings: Iterable[Mapping[str, Any]],
     today: date,
 ) -> str:
     """Assemble the watch prompt.
 
     Args:
-        holdings: Iterable of ``{"ticker": str, "name": str}`` mappings.
+        holdings: Iterable of ``{"ticker", "name", "verified"?}`` mappings.
+            ``verified`` is added by :func:`watcher.resolver.resolve_holdings`;
+            absent means we treat the entry as verified.
         today: Reference date — the digest covers the 24h preceding this date.
 
     Returns:
         A fully-formed user prompt ready to pass to the Agent SDK ``query()``.
     """
-    lines = [f"- {h['ticker']} — {h['name']}" for h in holdings]
+    lines = [_format_holding(h) for h in holdings]
     holdings_block = "\n".join(lines) if lines else "(aucune position configurée)"
 
     return f"""Tu es Djohodo, un veilleur d'actualités financières.
@@ -36,6 +46,12 @@ Aujourd'hui : {today.isoformat()}.
 
 Portefeuille à surveiller :
 {holdings_block}
+
+Note : un suffixe `*(non vérifié)*` signifie que le nom de l'instrument n'a
+pas pu être confirmé par notre résolveur (Yahoo Finance + OpenFIGI). Pour
+ces positions, sois particulièrement prudent : croise plusieurs sources
+avant de publier une actualité ; en cas de doute sur l'identité de
+l'instrument, retourne une liste `items` vide pour cette position.
 
 Pour CHAQUE position ci-dessus, effectue une ou deux recherches web (outil
 WebSearch) afin de trouver les actualités financières *matérielles* publiées

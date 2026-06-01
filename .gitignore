@@ -7,6 +7,10 @@
 digests/*
 !digests/.gitkeep
 
+# Resolver ticker → canonical name cache (restored across runs via
+# actions/cache in CI; lives locally on dev machines).
+cache/
+
 # Python
 __pycache__/
 *.py[cod]

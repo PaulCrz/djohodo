@@ -27,6 +27,7 @@ import anyio
 from watcher.agent import assemble_prompt, run_watch
 from watcher.delivery import deliver
 from watcher.portfolio import load_portfolio
+from watcher.resolver import resolve_holdings
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -50,6 +51,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 async def _amain(args: argparse.Namespace) -> int:
     try:
         holdings = await load_portfolio()
+        holdings = await resolve_holdings(holdings)
     except RuntimeError as exc:
         print(f"[djohodo] {exc}", file=sys.stderr)
         return 2

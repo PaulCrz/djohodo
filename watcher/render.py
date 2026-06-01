@@ -22,7 +22,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines: list[str] = [f"# Veille Djohodo — {payload['date']}", ""]
 
     for holding in payload.get("holdings", []):
-        lines.append(f"## {holding['ticker']} — {holding['name']}")
+        marker = "" if holding.get("verified", True) else " [?]"
+        lines.append(f"## {holding['ticker']}{marker} — {holding['name']}")
         items = holding.get("items", [])
 
         if not items:
@@ -74,7 +75,10 @@ def render_telegram(payload: dict[str, Any]) -> str:
     lines: list[str] = [f"<b>Veille Djohodo — {e(payload['date'])}</b>", ""]
 
     for holding in payload.get("holdings", []):
-        lines.append(f"<b>{e(holding['ticker'])} — {e(holding['name'])}</b>")
+        marker = "" if holding.get("verified", True) else " [?]"
+        lines.append(
+            f"<b>{e(holding['ticker'])}{marker} — {e(holding['name'])}</b>"
+        )
         items = holding.get("items", [])
 
         if not items:

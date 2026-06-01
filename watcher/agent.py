@@ -154,7 +154,16 @@ async def run_watch(
 
     chosen_model = model or os.environ.get("DJOHODO_MODEL") or DEFAULT_MODEL
     today = today or date.today()
-    prompt = assemble_prompt(holdings, today)
+
+    # Materialise once: build_prompt consumes the iterable, and we also need
+    # to remember which tickers were unverified so we can re-inject the
+    # `verified` flag into the model's output. Keeping `verified` out of the
+    # model's schema avoids relying on the model to faithfully echo it.
+    holdings_list = list(holdings)
+    verified_by_ticker = {
+        h["ticker"]: bool(h.get("verified", True)) for h in holdings_list
+    }
+    prompt = assemble_prompt(holdings_list, today)
 
     captured: dict[str, Any] = {}
 
@@ -212,6 +221,12 @@ async def run_watch(
         # `date` is required by the schema but the model can be sloppy; fill
         # defensively with today's date if missing.
         payload.setdefault("date", today.isoformat())
+        # Re-inject the resolver's `verified` flag onto each holding by
+        # ticker. The model never sees this field; we own it end-to-end so
+        # the renderers can flag unverified entries with `[?]`.
+        for holding in payload.get("holdings", []) or []:
+            ticker = holding.get("ticker")
+            holding["verified"] = verified_by_ticker.get(ticker, True)
         digest = render_markdown(payload)
 
     return WatchResult(

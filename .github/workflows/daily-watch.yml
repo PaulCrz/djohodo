@@ -33,6 +33,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
+      - name: Restore ticker resolver cache
+        # Survives across runs so we don't re-hit Yahoo Finance / OpenFIGI
+        # for tickers already resolved. The key is per-run so the save at
+        # end-of-job always persists (actions/cache only saves when the
+        # exact key didn't match on restore); `restore-keys` falls through
+        # to the most recent prior run's cache.
+        uses: actions/cache@v4
+        with:
+          path: cache/ticker_registry.json
+          key: ticker-registry-v1-${{ github.run_id }}
+          restore-keys: |
+            ticker-registry-v1-
+
       - name: Run Djohodo watcher
         env:
           # Portfolio is pulled at runtime from a Google Sheet published

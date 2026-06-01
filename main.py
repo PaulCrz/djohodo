@@ -24,8 +24,8 @@ from datetime import date
 
 import anyio
 
-from watcher import deliver
 from watcher.agent import assemble_prompt, run_watch
+from watcher.delivery import deliver
 from watcher.portfolio import load_portfolio
 
 

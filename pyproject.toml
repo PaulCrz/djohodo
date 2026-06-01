@@ -19,8 +19,6 @@ dependencies = [
 djohodo = "main:main"
 
 [tool.setuptools]
+# Explicit lists, so the build works without __init__.py marker files.
 py-modules = ["main"]
-
-[tool.setuptools.packages.find]
-include = ["watcher*", "analyst*"]
-exclude = ["digests*", "tests*"]
+packages = ["watcher", "analyst"]

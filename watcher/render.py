@@ -65,11 +65,20 @@ def _break_autolink(ticker: str) -> str:
     Telegram's heuristic sees ``word.tld`` and ``.PA`` happens to be a
     real ccTLD (Panama). Inserting a zero-width space (U+200B) right
     before the dot breaks the heuristic without changing the visible
-    glyph sequence. Works inside ``<b>`` so the bold styling is
-    preserved. Copy-paste from the message will carry the ZWSP — fine
-    for human reading, just be aware if scraping back out of the chat.
+    glyph sequence. Used for *unverified* tickers, where we don't want
+    Telegram to invent a link to nowhere.
     """
     return ticker.replace(".", "​.")
+
+
+def _yahoo_quote_url(ticker: str) -> str:
+    """URL of the Yahoo Finance quote page for this instrument.
+
+    Yahoo's path accepts dots, hyphens, and uppercase letters raw — the
+    tickers we hand in (already Yahoo-normalised by ``watcher.resolver``)
+    don't need URL escaping.
+    """
+    return f"https://finance.yahoo.com/quote/{ticker}"
 
 
 def render_telegram(payload: dict[str, Any]) -> str:
@@ -89,9 +98,25 @@ def render_telegram(payload: dict[str, Any]) -> str:
     lines: list[str] = [f"<b>Veille Djohodo — {e(payload['date'])}</b>", ""]
 
     for holding in payload.get("holdings", []):
-        marker = "" if holding.get("verified", True) else " [?]"
-        ticker = _break_autolink(e(holding["ticker"]))
-        lines.append(f"<b>{ticker}{marker} — {e(holding['name'])}</b>")
+        verified = holding.get("verified", True)
+        ticker_text = e(holding["ticker"])
+
+        if verified:
+            # Intentional link to the Yahoo Finance quote page — gives the
+            # blue accent rendering ("colored ticker") and the click is
+            # actually useful. `disable_web_page_preview` on the message
+            # prevents these links from generating preview cards.
+            href = e(_yahoo_quote_url(holding["ticker"]))
+            ticker_styled = f'<a href="{href}">{ticker_text}</a>'
+            marker = ""
+        else:
+            # Yahoo doesn't know this symbol → no link (would 404). Defuse
+            # Telegram's auto-linkification of any embedded dot so we don't
+            # accidentally turn it into a stray "domain" link instead.
+            ticker_styled = _break_autolink(ticker_text)
+            marker = " [?]"
+
+        lines.append(f"<b>{ticker_styled}{marker} — {e(holding['name'])}</b>")
         items = holding.get("items", [])
 
         if not items:

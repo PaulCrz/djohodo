@@ -28,6 +28,7 @@ from watcher.agent import assemble_prompt, run_watch
 from watcher.delivery import deliver
 from watcher.portfolio import load_portfolio
 from watcher.resolver import resolve_holdings
+from watcher.snapshot import compute_variations, load_previous, save_today
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -57,6 +58,22 @@ async def _amain(args: argparse.Namespace) -> int:
         return 2
 
     today = date.today()
+
+    # Snapshot the values + compute day-over-day variations. Order
+    # matters: load the previous snapshot BEFORE saving today's, so a
+    # second run on the same day still diffs against the right baseline.
+    previous = load_previous(today)
+    variations = compute_variations(holdings, previous)
+    save_today(holdings, today)
+    for h in holdings:
+        v = variations.get(h["ticker"])
+        if v is not None:
+            h["variation"] = {
+                "pct": v.pct,
+                "abs_eur": v.abs_eur,
+                "is_new": v.is_new,
+                "prev_date": v.prev_date,
+            }
 
     if args.dry_run:
         prompt = assemble_prompt(holdings, today)

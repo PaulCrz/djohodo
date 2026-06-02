@@ -66,6 +66,99 @@ _YAHOO_TO_FIGI: dict[str, str] = {
 }
 
 
+# Yahoo's ``exchange`` field (a 2–4 letter code like "PAR", "NMS", "NCM")
+# → human-readable name we show in the digest. Sub-tier NASDAQ markets
+# (NMS / NGM / NCM) are intentionally collapsed to "NASDAQ" — most users
+# don't care about Global Select vs Global vs Capital. CCC (crypto) and
+# CCY (currency) are deliberately absent: the label would just restate
+# what the ticker format already implies.
+EXCHANGE_LABELS: dict[str, str] = {
+    # United States
+    "NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NAS": "NASDAQ",
+    "NYQ": "NYSE", "ASE": "NYSE American", "PCX": "NYSE Arca",
+    "BTS": "Cboe", "PNK": "OTC Pink",
+    # Euronext
+    "PAR": "Euronext Paris", "AMS": "Euronext Amsterdam",
+    "BRU": "Euronext Brussels", "LIS": "Euronext Lisbon",
+    "ISE": "Euronext Dublin", "OSL": "Euronext Oslo",
+    # Other European
+    "MIL": "Borsa Italiana", "GER": "Xetra", "FRA": "Frankfurt",
+    "STU": "Stuttgart", "BER": "Berlin", "MUN": "Munich",
+    "LSE": "London Stock Exchange", "IOB": "LSE Intl Order Book",
+    "MCE": "BME (Madrid)", "EBS": "SIX Swiss Exchange",
+    "VTX": "SIX Swiss Exchange",
+    "STO": "Nasdaq Stockholm", "CPH": "Nasdaq Copenhagen",
+    "HEL": "Nasdaq Helsinki", "WSE": "Warsaw Stock Exchange",
+    "VIE": "Vienna",
+    # Asia / Pacific
+    "JPX": "Japan Exchange", "TYO": "Tokyo Stock Exchange",
+    "HKG": "Hong Kong Stock Exchange", "SES": "Singapore Exchange",
+    "ASX": "Australian Securities Exchange", "NZE": "NZX",
+    "KSC": "Korea Stock Exchange", "KOE": "Korea Stock Exchange",
+    "KOQ": "KOSDAQ", "SHH": "Shanghai Stock Exchange",
+    "SHZ": "Shenzhen Stock Exchange", "BSE": "Bombay Stock Exchange",
+    "NSI": "NSE India", "TAI": "Taiwan Stock Exchange",
+    # Americas
+    "TOR": "Toronto Stock Exchange", "VAN": "TSX Venture",
+    "SAO": "B3 (São Paulo)", "MEX": "Bolsa Mexicana",
+    "BUE": "BYMA (Buenos Aires)",
+}
+
+
+# Yahoo Finance ticker suffixes we know how to recognise as exchange
+# markers. Used by :func:`display_ticker` to decide whether the trailing
+# ``.XX`` is a strip-able exchange suffix vs a meaningful part of the
+# symbol (e.g. ``BRK.B`` is *not* in this set).
+_STRIPPABLE_SUFFIXES: set[str] = {
+    # Euronext family
+    "PA", "AS", "BR", "LS", "IR",
+    # German / Italian / Swiss
+    "DE", "F", "SG", "MU", "BE", "MI", "SW", "VX",
+    # London
+    "L", "IL",
+    # Spain
+    "MC", "MA",
+    # Nordic
+    "ST", "CO", "HE", "OL",
+    # Eastern Europe
+    "WA", "VI",
+    # Asia / Pacific
+    "T", "HK", "AX", "NZ", "KS", "KQ", "SS", "SZ",
+    "BO", "NS", "TW", "TWO", "JK", "BK", "KL", "SI",
+    # Americas (ex-US)
+    "TO", "V", "CN", "SA", "MX", "BA",
+    # Africa
+    "JO",
+}
+
+
+def exchange_label(exchange_code: str | None) -> str | None:
+    """Return a human-readable exchange name, or ``None`` if unknown.
+
+    Unknown codes deliberately return ``None`` so the renderer can omit
+    the exchange line entirely (better than displaying a cryptic code).
+    """
+    if not exchange_code:
+        return None
+    return EXCHANGE_LABELS.get(exchange_code.upper())
+
+
+def display_ticker(ticker: str, exchange_code: str | None) -> str:
+    """Strip a known Yahoo exchange suffix from the ticker when we *also*
+    have a human-readable label to show in its place.
+
+    If we don't have a label (unknown exchange code, unresolved ticker),
+    we leave the full ticker intact — losing the suffix without
+    compensating it with a label would silently drop information.
+    """
+    if not exchange_label(exchange_code):
+        return ticker
+    root, dot, suffix = ticker.rpartition(".")
+    if dot and root and suffix.upper() in _STRIPPABLE_SUFFIXES:
+        return root
+    return ticker
+
+
 @dataclass(frozen=True)
 class ResolvedTicker:
     """One resolved (or unresolved-but-flagged) holding."""
@@ -94,9 +187,11 @@ async def resolve_holdings(
             returned by :func:`watcher.portfolio.load_portfolio`.
 
     Returns:
-        A new list where each entry is ``{ticker, name, verified}``.
+        A new list where each entry is ``{ticker, name, verified, exchange}``.
         ``verified=True`` when Yahoo or OpenFIGI answered; ``False`` when
-        the LLM-extracted name was kept verbatim.
+        the LLM-extracted name was kept verbatim. ``exchange`` is the raw
+        Yahoo exchange code (or ``None`` for LLM fallbacks); the renderer
+        maps it through :func:`exchange_label` for display.
 
     Raises:
         RuntimeError: If *every* lookup failed in the same run (network
@@ -170,7 +265,14 @@ def _resolve_sync(holdings: list[dict[str, str]]) -> list[dict[str, Any]]:
         )
 
     return [
-        {"ticker": r.ticker, "name": r.name, "verified": r.verified}
+        {
+            "ticker": r.ticker,
+            "name": r.name,
+            "verified": r.verified,
+            "exchange": r.exchange,    # raw Yahoo code (e.g. "PAR"); renderer
+                                       # converts to a human label via
+                                       # exchange_label()
+        }
         for r in resolved
     ]
 

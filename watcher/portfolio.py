@@ -48,6 +48,22 @@ PORTFOLIO_EXTRACT_SCHEMA: dict[str, Any] = {
                             "(entreprise, ETF, ou cryptomonnaie)."
                         ),
                     },
+                    "amount": {
+                        "type": "number",
+                        "description": (
+                            "Quantité détenue (nombre d'actions, d'unités, "
+                            "ou de cryptomonnaies). Omets si non identifiable."
+                        ),
+                    },
+                    "total_eur": {
+                        "type": "number",
+                        "description": (
+                            "Valeur totale de la position en euros (champ "
+                            "'Total' ou équivalent dans la feuille). Convertis "
+                            "le format français '12 345,67 €' en nombre "
+                            "(12345.67). Omets si non identifiable."
+                        ),
+                    },
                 },
                 "required": ["ticker", "name"],
             },
@@ -95,6 +111,13 @@ Pour chaque position retenue, fournis :
 - **`name`** : nom officiel de l'instrument. Si tu reconnais avec certitude
   l'émetteur derrière un ticker obscur, utilise le nom complet ; sinon,
   garde le libellé brut tel qu'il apparaît dans la feuille.
+- **`amount`** *(optionnel)* : quantité détenue (nombre d'actions, parts,
+  ou unités de crypto). Tu trouveras souvent une ligne 'Amount' juste
+  sous le ticker. Omets si non identifiable.
+- **`total_eur`** *(optionnel)* : valeur totale de la position en euros
+  (ligne 'Total' habituellement). Le format français de la feuille (par
+  exemple `12 345,67 €`) doit être converti en nombre simple (12345.67).
+  Omets si non identifiable.
 
 Quand tu as terminé, appelle UNE SEULE FOIS l'outil
 `mcp__djohodo_portfolio__submit_portfolio` avec la liste complète. NE
@@ -105,8 +128,13 @@ PUBLIE AUCUN TEXTE LIBRE — passe exclusivement par l'outil.
 # --- Public entrypoint -------------------------------------------------------
 
 
-async def load_portfolio() -> list[dict[str, str]]:
-    """Return a list of ``{"ticker", "name"}`` holdings from the Sheet.
+async def load_portfolio() -> list[dict[str, Any]]:
+    """Return a list of holdings extracted from the Sheet.
+
+    Each entry has at least ``{"ticker": str, "name": str}``. The fields
+    ``amount`` (float) and ``total_eur`` (float) are present when the LLM
+    could pull them from the sheet — they feed the daily variation diff
+    in :mod:`watcher.snapshot`.
 
     Raises:
         RuntimeError: If ``PORTFOLIO_SHEET_URL`` is unset, the fetch fails,
@@ -146,7 +174,7 @@ async def _fetch_sheet_csv(url: str) -> str:
 # --- LLM extraction ----------------------------------------------------------
 
 
-async def _extract_holdings(csv_text: str) -> list[dict[str, str]]:
+async def _extract_holdings(csv_text: str) -> list[dict[str, Any]]:
     """Ask the Agent SDK to extract tradable holdings from a messy CSV."""
     try:
         from claude_agent_sdk import (  # type: ignore[import-not-found]
@@ -212,13 +240,26 @@ async def _extract_holdings(csv_text: str) -> list[dict[str, str]]:
             "The CSV may be empty or unparseable."
         )
 
-    cleaned = [
-        {"ticker": h["ticker"], "name": h["name"]}
-        for h in raw_holdings
-        if isinstance(h, dict)
-        and isinstance(h.get("ticker"), str) and h["ticker"].strip()
-        and isinstance(h.get("name"), str) and h["name"].strip()
-    ]
+    cleaned: list[dict[str, Any]] = []
+    for h in raw_holdings:
+        if not isinstance(h, dict):
+            continue
+        ticker = h.get("ticker")
+        name = h.get("name")
+        if not (isinstance(ticker, str) and ticker.strip()):
+            continue
+        if not (isinstance(name, str) and name.strip()):
+            continue
+        entry: dict[str, Any] = {"ticker": ticker, "name": name}
+        # `amount` and `total_eur` are optional — only carry them through
+        # when present and numeric. Snapshot/diff code tolerates absence.
+        amount = h.get("amount")
+        if isinstance(amount, (int, float)):
+            entry["amount"] = float(amount)
+        total_eur = h.get("total_eur")
+        if isinstance(total_eur, (int, float)):
+            entry["total_eur"] = float(total_eur)
+        cleaned.append(entry)
     if not cleaned:
         raise RuntimeError(
             "Portfolio extraction returned no usable holdings. "

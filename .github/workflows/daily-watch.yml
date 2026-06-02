@@ -8,7 +8,13 @@ on:
     # entirely. An off-peak minute gives the scheduler far better odds of
     # firing on time.
     - cron: "17 6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      triggered_by:
+        description: 'Where this manual run came from (telegram, manual, ...)'
+        required: false
+        default: 'manual'
+        type: string
 
 permissions:
   contents: write   # needed to commit the generated digest back to the repo
@@ -33,18 +39,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Restore ticker resolver cache
-        # Survives across runs so we don't re-hit Yahoo Finance / OpenFIGI
-        # for tickers already resolved. The key is per-run so the save at
-        # end-of-job always persists (actions/cache only saves when the
-        # exact key didn't match on restore); `restore-keys` falls through
-        # to the most recent prior run's cache.
+      - name: Restore djohodo cache (ticker registry + daily snapshots)
+        # Survives across runs:
+        #   - cache/ticker_registry.json  → resolver hits Yahoo only for new
+        #     tickers
+        #   - cache/snapshots/*.json      → yesterday's holdings feed the
+        #     day-over-day variation diff
+        # Key is per-run so save always persists (actions/cache only saves
+        # when the exact key didn't match on restore); restore-keys falls
+        # through to the most recent prior run's cache.
         uses: actions/cache@v4
         with:
-          path: cache/ticker_registry.json
-          key: ticker-registry-v1-${{ github.run_id }}
+          path: cache
+          key: djohodo-cache-v2-${{ github.run_id }}
           restore-keys: |
-            ticker-registry-v1-
+            djohodo-cache-v2-
+
+      - name: Log trigger source
+        # Helps tell apart cron runs from manual dispatches (and which
+        # surface they came from — the Telegram /watch trigger sets
+        # inputs.triggered_by=telegram, defaulting to 'manual' otherwise).
+        run: |
+          echo "::notice title=Trigger::event=${{ github.event_name }} triggered_by=${{ inputs.triggered_by || 'cron' }}"
 
       - name: Run Djohodo watcher
         env:

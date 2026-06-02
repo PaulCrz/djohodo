@@ -111,6 +111,13 @@ Pour chaque position retenue, fournis :
 - **`name`** : nom officiel de l'instrument. Si tu reconnais avec certitude
   l'émetteur derrière un ticker obscur, utilise le nom complet ; sinon,
   garde le libellé brut tel qu'il apparaît dans la feuille.
+
+**IMPORTANT — fusion des doublons** : si la même position apparaît dans
+plusieurs sections de la feuille (par exemple BTC dans `Kraken Pro` ET
+dans `Kraken Wallet`, ou une action détenue à la fois en PEA et chez un
+broker classique), n'émets qu'**une seule entrée par ticker** en **sommant**
+les champs `amount` et `total_eur` des différentes occurrences. Le digest
+montre une position par instrument, pas par compte.
 - **`amount`** *(optionnel)* : quantité détenue (nombre d'actions, parts,
   ou unités de crypto). Tu trouveras souvent une ligne 'Amount' juste
   sous le ticker. Omets si non identifiable.
@@ -266,4 +273,36 @@ async def _extract_holdings(csv_text: str) -> list[dict[str, Any]]:
             "Check that the sheet contains tradable instruments "
             "(equities, ETFs, crypto) with identifiable tickers."
         )
-    return cleaned
+    return merge_same_ticker_holdings(cleaned)
+
+
+def merge_same_ticker_holdings(
+    holdings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse multiple entries for the same ticker into a single one.
+
+    Real portfolios commonly hold the same asset across multiple
+    custody locations — e.g. BTC on a Kraken Pro account *and* in a
+    Kraken Wallet, or one stock in a PEA *and* in an IBKR taxable
+    account. The extraction LLM faithfully emits each occurrence
+    separately. From the user's perspective, that's a duplicate in
+    the digest. We merge here so the news watch + the variation diff
+    see one position per ticker.
+
+    Numeric fields (``amount`` and ``total_eur``) are summed. The
+    first occurrence's ``name`` wins — they should be identical
+    anyway since the ticker is the same, but in pathological cases
+    (LLM extracted slightly different names) we don't want to
+    silently flip-flop. Insertion order is preserved.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for h in holdings:
+        ticker = h["ticker"]
+        existing = merged.get(ticker)
+        if existing is None:
+            merged[ticker] = dict(h)
+            continue
+        for field in ("amount", "total_eur"):
+            if field in h:
+                existing[field] = existing.get(field, 0.0) + float(h[field])
+    return list(merged.values())

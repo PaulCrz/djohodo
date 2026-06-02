@@ -35,6 +35,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from watcher.portfolio import merge_same_ticker_holdings
+
 
 SNAPSHOTS_DIR = Path("cache/snapshots")
 
@@ -125,10 +127,18 @@ def compute_variations(
         prev_by_ticker: dict[str, dict[str, Any]] = {}
         prev_date: str | None = None
     else:
-        prev_by_ticker = {
-            h["ticker"]: h
+        # Snapshots saved before the deduplication fix (commit "fix BTC
+        # duplicate") may contain the same ticker twice — e.g. BTC for
+        # Kraken Pro + Kraken Wallet. Merge defensively so the variation
+        # diff isn't comparing today's summed total to yesterday's
+        # last-occurrence-wins sliver.
+        raw_prev = [
+            h
             for h in previous.get("holdings", [])
             if isinstance(h, dict) and isinstance(h.get("ticker"), str)
+        ]
+        prev_by_ticker = {
+            h["ticker"]: h for h in merge_same_ticker_holdings(raw_prev)
         }
         prev_date = previous.get("date")
 

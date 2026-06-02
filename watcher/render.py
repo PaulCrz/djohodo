@@ -58,6 +58,20 @@ def _esc_html(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _break_autolink(ticker: str) -> str:
+    """Defuse Telegram's auto-linkification of ticker symbols.
+
+    Tickers like ``BNKE.PA`` get rendered as clickable links because
+    Telegram's heuristic sees ``word.tld`` and ``.PA`` happens to be a
+    real ccTLD (Panama). Inserting a zero-width space (U+200B) right
+    before the dot breaks the heuristic without changing the visible
+    glyph sequence. Works inside ``<b>`` so the bold styling is
+    preserved. Copy-paste from the message will carry the ZWSP — fine
+    for human reading, just be aware if scraping back out of the chat.
+    """
+    return ticker.replace(".", "​.")
+
+
 def render_telegram(payload: dict[str, Any]) -> str:
     """Render the structured digest for Telegram (``parse_mode=HTML``).
 
@@ -76,9 +90,8 @@ def render_telegram(payload: dict[str, Any]) -> str:
 
     for holding in payload.get("holdings", []):
         marker = "" if holding.get("verified", True) else " [?]"
-        lines.append(
-            f"<b>{e(holding['ticker'])}{marker} — {e(holding['name'])}</b>"
-        )
+        ticker = _break_autolink(e(holding["ticker"]))
+        lines.append(f"<b>{ticker}{marker} — {e(holding['name'])}</b>")
         items = holding.get("items", [])
 
         if not items:

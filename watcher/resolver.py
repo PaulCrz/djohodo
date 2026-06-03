@@ -178,20 +178,24 @@ class ResolvedTicker:
 
 
 async def resolve_holdings(
-    holdings: list[dict[str, str]],
+    holdings: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Augment each ``{ticker, name}`` with a canonical name + ``verified`` flag.
+    """Augment each holding with a canonical name + verified/exchange flags.
 
     Args:
-        holdings: List of ``{"ticker": str, "name": str}`` mappings as
-            returned by :func:`watcher.portfolio.load_portfolio`.
+        holdings: List of holding mappings from :func:`watcher.portfolio.load_portfolio`.
+            Each carries at least ``ticker`` and ``name``; may also carry
+            ``amount`` and ``total_eur`` (used downstream by
+            :mod:`watcher.snapshot` for the day-over-day diff). All input
+            fields are preserved on output.
 
     Returns:
-        A new list where each entry is ``{ticker, name, verified, exchange}``.
-        ``verified=True`` when Yahoo or OpenFIGI answered; ``False`` when
-        the LLM-extracted name was kept verbatim. ``exchange`` is the raw
-        Yahoo exchange code (or ``None`` for LLM fallbacks); the renderer
-        maps it through :func:`exchange_label` for display.
+        A new list where each entry is the input entry merged with
+        ``{name (canonical), verified, exchange}``. ``verified=True`` when
+        Yahoo or OpenFIGI answered; ``False`` when the LLM-extracted name
+        was kept verbatim. ``exchange`` is the raw Yahoo exchange code
+        (or ``None`` for LLM fallbacks); the renderer maps it through
+        :func:`exchange_label` for display.
 
     Raises:
         RuntimeError: If *every* lookup failed in the same run (network
@@ -203,10 +207,10 @@ async def resolve_holdings(
     return await anyio.to_thread.run_sync(_resolve_sync, list(holdings))
 
 
-def _resolve_sync(holdings: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _resolve_sync(holdings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cache = _load_cache(CACHE_PATH)
     cache_dirty = False
-    resolved: list[ResolvedTicker] = []
+    output: list[dict[str, Any]] = []
     hits = 0
 
     for entry in holdings:
@@ -215,45 +219,51 @@ def _resolve_sync(holdings: list[dict[str, str]]) -> list[dict[str, Any]]:
 
         cached = cache.get(ticker)
         if cached and cached.get("source") in {"yahoo", "openfigi"}:
-            resolved.append(
-                ResolvedTicker(
-                    ticker=ticker,
-                    name=cached["name"],
-                    quote_type=cached.get("quote_type"),
-                    exchange=cached.get("exchange"),
-                    source=cached["source"],
-                )
+            rt = ResolvedTicker(
+                ticker=ticker,
+                name=cached["name"],
+                quote_type=cached.get("quote_type"),
+                exchange=cached.get("exchange"),
+                source=cached["source"],
             )
-            hits += 1
-            continue
-
-        rt = _lookup_yahoo(ticker) or _lookup_openfigi(ticker)
-        if rt is not None:
-            cache[ticker] = {
-                "name": rt.name,
-                "quote_type": rt.quote_type,
-                "exchange": rt.exchange,
-                "source": rt.source,
-                "resolved_at": date.today().isoformat(),
-            }
-            cache_dirty = True
-            resolved.append(rt)
             hits += 1
         else:
-            # Both lookups failed — keep the LLM name, flag unverified.
-            print(
-                f"[djohodo] resolver: could not resolve {ticker} via Yahoo or "
-                f"OpenFIGI; keeping LLM name {llm_name!r} as unverified."
-            )
-            resolved.append(
-                ResolvedTicker(
+            looked_up = _lookup_yahoo(ticker) or _lookup_openfigi(ticker)
+            if looked_up is not None:
+                rt = looked_up
+                cache[ticker] = {
+                    "name": rt.name,
+                    "quote_type": rt.quote_type,
+                    "exchange": rt.exchange,
+                    "source": rt.source,
+                    "resolved_at": date.today().isoformat(),
+                }
+                cache_dirty = True
+                hits += 1
+            else:
+                # Both lookups failed — keep the LLM name, flag unverified.
+                print(
+                    f"[djohodo] resolver: could not resolve {ticker} via Yahoo "
+                    f"or OpenFIGI; keeping LLM name {llm_name!r} as unverified."
+                )
+                rt = ResolvedTicker(
                     ticker=ticker,
                     name=llm_name,
                     quote_type=None,
                     exchange=None,
                     source="llm",
                 )
-            )
+
+        # Preserve every field the caller already had on the entry (notably
+        # `amount` and `total_eur`, needed by watcher.snapshot for the
+        # day-over-day diff) and layer the resolver's contributions on top:
+        # canonical name overrides any LLM guess; verified + exchange are
+        # added.
+        merged = dict(entry)
+        merged["name"] = rt.name
+        merged["verified"] = rt.verified
+        merged["exchange"] = rt.exchange
+        output.append(merged)
 
     if cache_dirty:
         _save_cache(CACHE_PATH, cache)
@@ -264,17 +274,7 @@ def _resolve_sync(holdings: list[dict[str, str]]) -> list[dict[str, Any]]:
             "Network outage or both Yahoo Finance + OpenFIGI are down."
         )
 
-    return [
-        {
-            "ticker": r.ticker,
-            "name": r.name,
-            "verified": r.verified,
-            "exchange": r.exchange,    # raw Yahoo code (e.g. "PAR"); renderer
-                                       # converts to a human label via
-                                       # exchange_label()
-        }
-        for r in resolved
-    ]
+    return output
 
 
 # --- Yahoo Finance ----------------------------------------------------------

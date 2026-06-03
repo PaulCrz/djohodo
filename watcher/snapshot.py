@@ -160,7 +160,14 @@ def compute_variations(
 
         prev_total = prev.get("total_eur")
         if not isinstance(prev_total, (int, float)) or prev_total == 0:
-            # Prior snapshot has no usable value — treat as missing.
+            # Prior snapshot has the ticker but no usable value (snapshot
+            # saved before total_eur was wired end-to-end, ticker added
+            # mid-day with no value, …). Surface as "new" so the renderer
+            # at least shows the 🆕 marker instead of silently omitting
+            # the variation line.
+            out[ticker] = Variation(
+                pct=None, abs_eur=None, is_new=True, prev_date=prev_date
+            )
             continue
 
         abs_change = float(today_total) - float(prev_total)

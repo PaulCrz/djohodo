@@ -33,6 +33,22 @@ interface TelegramUpdate {
 // --- Handler ----------------------------------------------------------------
 
 export default {
+  /**
+   * Scheduled cron trigger — fires on the schedule declared in
+   * wrangler.jsonc's `triggers.crons`. We dispatch the same GitHub
+   * workflow as /watch, just tagged `triggered_by=worker-cron` for
+   * observability. The handler returns fast; the actual HTTP call to
+   * GitHub (and any failure notification to Telegram) runs in
+   * ctx.waitUntil() so we don't block the Worker scheduler.
+   */
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<void> {
+    ctx.waitUntil(runScheduledWatch(env));
+  },
+
   async fetch(
     request: Request,
     env: Env,
@@ -142,7 +158,7 @@ async function handleWatch(
   // Trigger the GitHub workflow. Catch and surface any error to the user
   // — silent failures would defeat the whole point of an on-demand trigger.
   try {
-    await dispatchWorkflow(env);
+    await dispatchWorkflow(env, "telegram");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("workflow_dispatch failed:", msg);
@@ -175,7 +191,12 @@ async function handleWatch(
 
 // --- GitHub Actions dispatch ------------------------------------------------
 
-async function dispatchWorkflow(env: Env): Promise<void> {
+type TriggerSource = "telegram" | "worker-cron";
+
+async function dispatchWorkflow(
+  env: Env,
+  triggeredBy: TriggerSource
+): Promise<void> {
   const url =
     `https://api.github.com/repos/${env.GITHUB_REPO}` +
     `/actions/workflows/${env.GITHUB_WORKFLOW}/dispatches`;
@@ -191,7 +212,7 @@ async function dispatchWorkflow(env: Env): Promise<void> {
     },
     body: JSON.stringify({
       ref: env.GITHUB_REF,
-      inputs: { triggered_by: "telegram" },
+      inputs: { triggered_by: triggeredBy },
     }),
   });
 
@@ -202,6 +223,34 @@ async function dispatchWorkflow(env: Env): Promise<void> {
     throw new Error(
       `GitHub API ${response.status}: ${body.slice(0, 300)}`
     );
+  }
+}
+
+// --- Scheduled handler ------------------------------------------------------
+
+/**
+ * Body of the cron-triggered run. No KV cooldown (the schedule itself
+ * is the rate limit), no pre-ack message (the digest IS the
+ * acknowledgment). If GitHub rejects the dispatch, surface the error
+ * via Telegram so the user knows the morning digest is going to be
+ * silent today.
+ */
+async function runScheduledWatch(env: Env): Promise<void> {
+  try {
+    await dispatchWorkflow(env, "worker-cron");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("scheduled dispatchWorkflow failed:", msg);
+    try {
+      await sendTelegram(
+        env,
+        Number(env.TELEGRAM_AUTHORIZED_CHAT_ID),
+        `❌ Veille programmée du matin: échec du déclenchement.\n` +
+          `<code>${escapeHtml(msg)}</code>`
+      );
+    } catch (notifyErr) {
+      console.error("failed to notify on scheduled failure:", notifyErr);
+    }
   }
 }
 

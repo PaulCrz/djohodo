@@ -1,17 +1,15 @@
 name: Daily portfolio watch
 
 on:
-  schedule:
-    # 06:17 UTC every day (≈08:17 Paris CEST / 07:17 CET).
-    # The :17 is deliberate — top-of-hour cron slots are heavily congested
-    # on GitHub Actions and routinely delayed by 15-60 min or skipped
-    # entirely. An off-peak minute gives the scheduler far better odds of
-    # firing on time.
-    - cron: "17 6 * * *"
+  # Scheduling is delegated to the Cloudflare Worker (telegram-trigger/)
+  # — see docs/cron-schedule.md. GitHub Actions' `schedule` event was
+  # unreliable (15 min to several hours of delay at minute-mark crons).
+  # The Worker fires on time and dispatches this workflow via the
+  # `workflow_dispatch` event, which has a much faster queue (~30 s).
   workflow_dispatch:
     inputs:
       triggered_by:
-        description: 'Where this manual run came from (telegram, manual, ...)'
+        description: 'Where this run came from (worker-cron, telegram, manual, ...)'
         required: false
         default: 'manual'
         type: string

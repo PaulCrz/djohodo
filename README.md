@@ -1,318 +1,125 @@
 # Djohodo
 
-> *Djohodo* — a watcher perched on a roof, seeing everything and reporting back.
+Daily portfolio news watch. Every morning at 07:30 Paris time, Djohodo reads
+the last 24 hours of financial news for the stocks in your Google Sheet and
+pushes a concise digest to your Telegram — impact rating, day-over-day
+variation, and source links per position.
 
-A personal automation that, **once per day every morning**, scans the last 24
-hours of financial news for the stocks in your portfolio and produces a concise
-Markdown digest: per holding, a short summary of any *material* news, its
-likely impact (**bullish / bearish / neutral**) with a one-line rationale, and
-the source URL.
+> Informational tool. **Not financial advice.**
 
-It is an **informational decision-support tool**. It is **not financial advice**.
+## What you get
 
----
-
-## Architecture
+Each morning, a Telegram message that looks like this:
 
 ```
- Google Sheet (CSV)
-      │
-      ▼
- watcher.portfolio  ── LLM extract ──► [{ticker, name}, …]
-      │
-      ▼
- watcher.agent  ── Claude Agent SDK (WebSearch + structured output) ──► WatchResult
-      │
-      ▼
- watcher.delivery  ──► console + digests/YYYY-MM-DD.md + Telegram
-      │
-      ▼
- analyst/  ── Phase 2 placeholder: future buy/sell/watch recommender
+2026-06-03
+
+▌ BNKE — Amundi Euro Stoxx Banks UCITS ETF Acc
+▌ Euronext Paris
+▌ 🟢 +2,45 %   (+125 €)
+▌
+▌ • BCE évoque un assouplissement monétaire avancé
+▌   Impact: haussier — Les banques européennes profiteraient d'une remontée
+▌   anticipée des marges nettes d'intérêt.
+▌   Source: Reuters
 ```
 
-- **`watcher/`** — the only module with logic in Phase 1.
-  - `portfolio.py` — fetches the Google Sheet and extracts holdings via a
-    cheap Haiku pre-pass.
-  - `prompt.py` — digest prompt template (French).
-  - `agent.py` — orchestrates the async `query()` call, captures the
-    structured payload via an MCP tool, exposes `total_cost_usd`.
-  - `render.py` — converts the typed payload to Markdown (file) and HTML
-    (Telegram).
-  - `delivery.py` — prints to stdout, writes `digests/YYYY-MM-DD.md`,
-    pushes to Telegram when `DJOHODO_TELEGRAM_ENABLED=1`.
-- **`analyst/`** — documented placeholder for Phase 2 ("help me decide"). See
-  [`analyst/README.md`](analyst/README.md) for the planned extension point.
-- **`main.py`** — CLI: loads portfolio, runs the watcher, delivers the digest.
-  Supports `--dry-run` to preview the prompt without spending credit.
-- **`.github/workflows/daily-watch.yml`** — daily cron in GitHub Actions.
+One block per position, with clickable ticker → Yahoo Finance quote page.
 
----
+## How it works
+
+```
+   Your Google Sheet                Cloudflare Worker
+   (any layout — the LLM            cron @ 07:30 Paris
+    extracts the positions)             │
+            │                           │ workflow_dispatch
+            ▼                           ▼
+        ┌──────────────────────  GitHub Actions  ─────────────┐
+        │  Read sheet → resolve tickers (Yahoo) → fetch news  │
+        │  with Claude + WebSearch → render → push Telegram   │
+        └─────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+                              You read it
+```
+
+You can also type `/watch` to `@djohodobot` for an instant run any time.
 
 ## Setup
 
-### 1. Install (Python 3.12)
+Three things to wire up — each has its own short guide:
+
+1. **Your portfolio** in a Google Sheet (any layout, published as CSV).
+   See the [Portfolio section](#portfolio) below.
+2. **A Telegram bot** to receive the digest.
+   See the [Telegram section](#telegram) below.
+3. **A Cloudflare Worker** for the daily cron + `/watch` command.
+   See [`telegram-trigger/README.md`](telegram-trigger/README.md) and
+   [`docs/cron-schedule.md`](docs/cron-schedule.md).
+
+Then add these secrets to the GitHub repo (`gh secret set NAME` or
+Settings → Secrets):
+
+| Secret | What it is |
+|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | `claude setup-token` output. Carries your Anthropic subscription credit into CI. |
+| `PORTFOLIO_SHEET_URL` | The CSV-export URL of your Google Sheet. |
+| `TELEGRAM_BOT_TOKEN` | From `@BotFather` when you create the bot. |
+| `TELEGRAM_CHAT_ID` | Your numeric Telegram id (ask `@userinfobot`). |
+
+And one variable to turn Telegram delivery on:
 
 ```bash
-git clone <this-repo> djohodo
-cd djohodo
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+gh variable set DJOHODO_TELEGRAM_ENABLED --body 1
 ```
 
-### 2. Configure your portfolio
+## Daily use
 
-Set `PORTFOLIO_SHEET_URL` to the CSV-export URL of a published Google
-Sheet — see "Portfolio from a Google Sheet" below for the one-time setup.
-The watcher extracts your holdings from that sheet on every run via a
-cheap LLM pre-pass (~$0.005), so any sheet layout works and you never
-edit the repo when your portfolio changes.
+- **`/watch`** in Telegram → digest in 1–2 minutes.
+- The morning cron fires automatically at **07:30 Paris CEST** (06:30 in winter).
+- `gh workflow run daily-watch.yml` from a terminal — same effect.
 
-### 3. Configure environment
+The digest is also saved as `digests/YYYY-MM-DD.md` in the repo.
 
-```bash
-cp .env.example .env
-# edit .env if you want to switch models or enable email
-```
+## Cost
 
----
+Each run consumes ~$0.30–0.60 of your Claude subscription credit. The
+Cloudflare Worker and GitHub Actions are both on free tiers — $0/month
+of extra infrastructure.
 
-## Authentication — two supported paths
+`total_cost_usd` is printed on stderr at the end of every run.
 
-Djohodo uses the **Claude Agent SDK** (`claude-agent-sdk`), so it inherits the
-SDK's authentication rules. **Never hardcode credentials** — everything comes
-from the environment.
+## Portfolio
 
-### (a) Subscription credit — default for both local AND CI
+Any Google Sheet layout works — a clean two-column ticker list or a full
+patrimonial dashboard. Before each run, a cheap Haiku pre-pass (~$0.005)
+extracts the tradable positions (equities, ETFs, crypto) and ignores the
+rest (cash, savings accounts, livrets, biens personnels…). It also
+normalises Google Finance prefixes (`EPA:AM`) to Yahoo format (`AM.PA`).
 
-Use your Claude subscription's monthly Agent SDK credit.
+**Publish your sheet as CSV** — two equivalent paths:
 
-**Locally:**
+- **File → Share → Publish to web → CSV** (recommended).
+  Gives you a stable URL like `…/pub?output=csv`.
+- **File → Share → Anyone with the link → Viewer**, then rewrite the share
+  URL from `/edit?gid=0` to `/export?format=csv&gid=0`.
 
-1. Make sure `ANTHROPIC_API_KEY` is **unset** (the SDK prefers it when present).
-   ```bash
-   unset ANTHROPIC_API_KEY
-   ```
-2. Log into Claude Code once on this machine:
-   ```bash
-   claude login
-   ```
-3. Run Djohodo normally — the SDK will use your subscription credit.
+> Either makes the sheet readable by anyone holding the URL. Fine for
+> tickers; don't add account numbers or other sensitive columns.
 
-**In CI (GitHub Actions):** the included workflow uses a long-lived OAuth
-token tied to your subscription, stored as the `CLAUDE_CODE_OAUTH_TOKEN` repo
-secret. Generate it once on a machine where `claude login` is already done:
+## Telegram
 
-```bash
-claude setup-token
-```
+1. Message `@BotFather` → `/newbot` → save the token it gives you
+   (`123456789:ABC…`).
+2. Message `@userinfobot` → save your numeric id.
+3. Open the new bot and press **Start** (Telegram requires this before a bot
+   can DM you).
 
-Paste the printed token into the GitHub repo secret `CLAUDE_CODE_OAUTH_TOKEN`
-(Settings → Secrets and variables → Actions). The token is long-lived but
-revocable — `claude setup-token --revoke` invalidates it. No `ANTHROPIC_API_KEY`
-is needed in CI on this path.
+That's it. Add the two values as repo secrets (see [Setup](#setup)).
 
-### (b) Pay-as-you-go API key (alternative)
+## Phase 2 — coming later
 
-If you'd rather bill per-call against an Anthropic Console account:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-To use this path in CI, store the key as the repo secret `ANTHROPIC_API_KEY`
-and update the workflow's `Run Djohodo` step to expose
-`ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}` instead of
-`CLAUDE_CODE_OAUTH_TOKEN`. Cap monthly spend in Anthropic Console first.
-
----
-
-## Run
-
-### Dry run (cheap, no watch call)
-
-```bash
-python main.py --dry-run
-```
-
-Fetches your sheet, runs the extraction pre-pass (~$0.005), and prints
-the fully-assembled news-watch prompt for inspection. Use this when you
-add new tickers to the sheet or iterate on `watcher/prompt.py`, without
-paying for a full WebSearch round.
-
-### Real run
-
-```bash
-python main.py
-```
-
-This will:
-1. Fetch your portfolio sheet and extract tradable holdings (Haiku pre-pass).
-2. Build the prompt and call the Agent SDK with `WebSearch` allowed.
-3. Print the digest, write it to `digests/YYYY-MM-DD.md`.
-4. Push it to Telegram (if `DJOHODO_TELEGRAM_ENABLED=1`).
-5. Print the model id and `total_cost_usd` on stderr.
-
-### Override the model
-
-```bash
-python main.py --model claude-sonnet-4-6
-# or
-DJOHODO_MODEL=claude-sonnet-4-6 python main.py
-```
-
----
-
-## Scheduling (GitHub Actions)
-
-`.github/workflows/daily-watch.yml` runs every day at **06:00 UTC** and on
-manual `workflow_dispatch`. Required configuration:
-
-**Repository secrets**
-- `CLAUDE_CODE_OAUTH_TOKEN` *(required)* — long-lived OAuth token generated by
-  running `claude setup-token` on a machine where you're logged into Claude
-  Code. Carries your subscription credit into CI.
-- `PORTFOLIO_SHEET_URL` *(required)* — a Google Sheet exported as CSV
-  (see "Portfolio from a Google Sheet" below).
-- `ANTHROPIC_API_KEY` *(optional)* — only if you switch the workflow to the
-  pay-as-you-go path (see auth section above).
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` *(optional)* — only if you enable
-  Telegram delivery.
-
-**Repository variables (optional)**
-- `DJOHODO_MODEL` — override the model id (default: Haiku 4.5).
-- `DJOHODO_TELEGRAM_ENABLED` — set to `1` to enable Telegram delivery.
-
-Each successful run uploads the digest as a workflow artifact and commits
-`digests/YYYY-MM-DD.md` back to the repo. The cron expression is in UTC —
-adjust the `0 6 * * *` value if you want a different local morning time.
-
----
-
-## Portfolio from a Google Sheet
-
-The watcher pulls its holdings list from a published Google Sheet on every
-run, so you maintain the portfolio in Google Sheets and never touch the
-repo. No Google Cloud project, no service account, no API key.
-
-**Any sheet layout works.** Before each daily watch, a cheap pre-step
-(Haiku, ~$0.005) extracts the tradable holdings from the raw CSV —
-equities, ETFs, crypto — and ignores everything else (cash, livrets,
-biens personnels, soldes bancaires…). It also converts Google-Finance
-ticker prefixes (`EPA:AM`, `NASDAQ:SLS`) to the Yahoo Finance format
-(`AM.PA`, `SLS`) that financial news sources index more reliably.
-
-That means you can point Djohodo at:
-
-- a clean two-column `ticker` / `name` sheet, **or**
-- a full patrimonial dashboard with multiple sections, sub-totals,
-  proportions, mixed asset classes — the extraction agent figures out
-  what's a tradable position and what's noise.
-
-The only thing it needs to recognise an instrument is a **ticker** or a
-clearly identifiable **company / ETF name** somewhere in the row.
-
-**Publish the sheet as CSV — two equivalent paths:**
-
-**Option A — "Publish to web" (recommended for cron stability).**
-1. Open the sheet → **File** → **Share** → **Publish to web**.
-2. In the dropdowns: **Entire document** (or just the tab) → **Comma-separated values (.csv)**.
-3. Click **Publish** → confirm.
-4. Copy the URL Google gives you. It looks like:
-   ```
-   https://docs.google.com/spreadsheets/d/e/<LONG_ID>/pub?output=csv
-   ```
-5. This URL stays stable; the sheet content is re-cached by Google every ~5 min.
-
-**Option B — Share "anyone with the link", then build the export URL.**
-1. **File** → **Share** → **General access** → **Anyone with the link** → **Viewer**.
-2. Take the share URL: `https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit?gid=<TAB_GID>`.
-3. Rewrite it to:
-   ```
-   https://docs.google.com/spreadsheets/d/<SHEET_ID>/export?format=csv&gid=<TAB_GID>
-   ```
-   (`<TAB_GID>` is `0` for the first tab unless you've created others.)
-
-**Then store it in the repo:**
-
-```bash
-gh secret set PORTFOLIO_SHEET_URL --repo PaulCrz/djohodo
-# paste the URL at the prompt
-```
-
-**Privacy note.** Either path makes the sheet readable by anyone who has
-the URL (which acts as a bearer credential). For a portfolio that's just
-tickers + names this is fine. If you start adding sensitive columns
-(quantities, P&L, broker account ids), switch to a service-account auth
-flow instead — but the watcher only needs ticker + name today, so keep
-the rest of that data out of this sheet.
-
-**Local testing.** With `PORTFOLIO_SHEET_URL` set in your `.env` or shell,
-`python main.py --dry-run` will fetch the live sheet and render the prompt
-against your real holdings, without making a model call.
-
----
-
-## Telegram delivery (optional)
-
-The watcher can push the digest to Telegram via the **Bot API** — free,
-unlimited for personal use, no business verification, no template approval,
-no 24h conversation window. Setup is ~2 minutes.
-
-**One-time setup on Telegram's side:**
-
-1. In Telegram, message **`@BotFather`** → `/newbot` → pick a display name
-   and a unique `@username` ending in `bot`. BotFather replies with an
-   HTTP token of the form `123456789:ABC-DEF…`. Save it — that's your
-   `TELEGRAM_BOT_TOKEN`.
-2. Message **`@userinfobot`** in Telegram → it replies with your numeric
-   user id. That's your `TELEGRAM_CHAT_ID` (positive integer for a private
-   chat). For a channel use `@channel_username`; for a supergroup use the
-   `-100…` form.
-3. Open a chat with your new bot and press **Start** (or send `/start`) —
-   Telegram requires the user to initiate contact before the bot can DM
-   them.
-
-**Then enable it in CI:**
-
-```bash
-gh secret set TELEGRAM_BOT_TOKEN --repo PaulCrz/djohodo   # paste the BotFather token
-gh secret set TELEGRAM_CHAT_ID   --repo PaulCrz/djohodo   # paste your numeric id
-gh variable set DJOHODO_TELEGRAM_ENABLED --body 1 --repo PaulCrz/djohodo
-```
-
-The next cron (or a manual `gh workflow run daily-watch.yml`) will deliver
-the digest to your Telegram chat as an HTML-formatted message.
-
-**Caveats.**
-- Messages above 4096 chars are truncated with an ellipsis (Telegram's
-  hard cap on a single `sendMessage`). For a portfolio that pushes past
-  that, the renderer is the place to compact.
-- Delivery is best-effort: a Telegram failure logs but never fails the
-  run, so the GitHub-committed digest remains the source of truth.
-
----
-
-## Cost note
-
-The default model is **Haiku 4.5** (`claude-haiku-4-5-20251001`), Anthropic's
-cheapest current model. A daily run scanning ~5–10 tickers with a handful of
-WebSearch calls is expected to cost a few cents per run on pay-as-you-go, or
-to consume a small slice of your subscription credit.
-
-Every run prints its `total_cost_usd` on stderr so you can monitor consumption.
-Switch to Sonnet (`claude-sonnet-4-6`) via env or `--model` once you start
-adding analyst-style reasoning in Phase 2.
-
----
-
-## Roadmap
-
-- **Phase 1 (this repo).** Daily news watch → Markdown digest. Done.
-- **Phase 2.** Add `analyst/` recommendation layer: consumes the watcher's
-  digest and surfaces `buy` / `sell` / `watch` signals with rationale. See
-  [`analyst/README.md`](analyst/README.md).
-
----
-
-*Djohodo is an informational tool. It does not constitute financial advice.*
+The [`analyst/`](analyst/) module is a documented placeholder for a
+recommendation layer: consume the watcher's digest and surface
+**buy / sell / watch** signals with rationale. Not built yet — see
+[`analyst/README.md`](analyst/README.md) for the planned extension point.
